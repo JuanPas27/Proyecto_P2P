@@ -253,10 +253,19 @@ class P2P_Peer:
         archivo = mensaje["archivo"]
         
         if archivo in self.mis_archivos:
+            ruta_completa = self.mis_archivos[archivo]["ruta"]
+            md5_hash = hashlib.md5()
+
+            with open(ruta_completa, "rb") as f:
+                for chunk in iter(lambda: f.read(4096), b""):
+                    md5_hash.update(chunk)
+            hash_calculado = md5_hash.hexdigest()
+
             respuesta = {
                 "tipo": "DESCARGA_AUTORIZADA",
                 "archivo": archivo,
-                "tamaño": self.mis_archivos[archivo]["tamaño"]
+                "tamaño": self.mis_archivos[archivo]["tamaño"],
+                "md5": hash_calculado
             }
         else:
             respuesta = {
@@ -359,6 +368,8 @@ class P2P_Peer:
                 print(f"Error: {respuesta.get('mensaje', 'Desconocido')}")
                 return
             
+            md5_esperado = respuesta.get("md5")
+            
             sock_datos = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock_datos.connect((peer_ip, self.puerto_datos))
             
@@ -377,6 +388,8 @@ class P2P_Peer:
             nonce = sock_datos.recv(16)
             cipher = Cipher(algorithms.AES(self.llave_aes), modes.CTR(nonce))
             decryptor = cipher.decryptor()
+
+            md5_descarga = hashlib.md5()
             
             with open(ruta, 'wb') as f:
                 while recibido < tamaño:
@@ -385,14 +398,24 @@ class P2P_Peer:
                         break
                     chunk_desencriptado = decryptor.update(chunk)
                     f.write(chunk_desencriptado)
+                    md5_descarga.update(chunk_desencriptado)
                     recibido += len(chunk)
-                    
+
                     if recibido % (1024*1024) < 65536:
                         porcentaje = (recibido / tamaño) * 100
                         print(f"   Progreso: {porcentaje:.1f}% ({recibido/(1024*1024):.1f} MB)")
-            
+
             sock_datos.close()
             print(f"Descarga completada: {ruta}")
+
+            if md5_esperado:
+                md5_obtenido = md5_descarga.hexdigest()
+                if md5_obtenido == md5_esperado:
+                    print(f"Integridad verificada: El archivo es perfecto (MD5 coincide).")
+                else:
+                    print(f"¡ADVERTENCIA! El archivo está corrupto o fue modificado.")
+                    print(f"   Esperábamos: {md5_esperado}")
+                    print(f"   Obtuvimos:   {md5_obtenido}")
             
         except Exception as e:
             print(f"Error en descarga: {e}")
