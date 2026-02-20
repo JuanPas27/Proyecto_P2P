@@ -12,6 +12,9 @@ class P2P_Peer:
         self.puerto_control = 5000
         self.puerto_datos = 5001
         self.puerto_discovery = 5003
+
+        self.password_red = "el_shrek" 
+        self.auth_token = hashlib.sha256(self.password_red.encode()).hexdigest()
         
         self.mi_id = hashlib.sha256(f"{self.mi_ip}:{self.puerto_control}".encode()).hexdigest()[:8]
         self.peers_conocidos = {}
@@ -132,7 +135,8 @@ class P2P_Peer:
             
             mensaje = json.dumps({
                 "tipo": "DISCOVERY",
-                "ip": self.mi_ip
+                "ip": self.mi_ip,
+                "token": self.auth_token
             })
             
             sock.sendto(mensaje.encode(), ('255.255.255.255', self.puerto_discovery))
@@ -143,6 +147,8 @@ class P2P_Peer:
                 try:
                     data, addr = sock.recvfrom(1024)
                     respuesta = json.loads(data.decode())
+                    if respuesta.get("token") != self.auth_token:
+                        return
                     
                     if respuesta["tipo"] == "DISCOVERY_RESPONSE" and addr[0] != self.mi_ip:
                         peers_encontrados.append(addr[0])
@@ -168,6 +174,11 @@ class P2P_Peer:
                 return
                 
             mensaje = json.loads(data)
+
+            if mensaje.get("token") != self.auth_token:
+                respuesta = {"tipo": "ERROR", "mensaje": "Autenticacion fallida"}
+                cliente.send(json.dumps(respuesta).encode())
+                return
             
             if mensaje["tipo"] == "BUSCAR":
                 self.manejar_busqueda(cliente, mensaje)
@@ -186,6 +197,10 @@ class P2P_Peer:
                 return
                 
             mensaje = json.loads(data)
+
+            if mensaje.get("token") != self.auth_token:
+                print(f"\nIntento de descarga bloqueado desde {addr[0]} (Token inválido)")
+                return
             
             if mensaje["tipo"] == "DESCARGA":
                 self.enviar_archivo(cliente, mensaje["archivo"])
@@ -198,10 +213,14 @@ class P2P_Peer:
     def manejar_discovery(self, servidor, data, addr):
         try:
             mensaje = json.loads(data.decode())
+
+            if mensaje.get("token") != self.auth_token:
+                return
             
             if mensaje["tipo"] == "DISCOVERY" and addr[0] != self.mi_ip:
                 respuesta = {
-                    "tipo": "DISCOVERY_RESPONSE"
+                    "tipo": "DISCOVERY_RESPONSE",
+                    "token": self.auth_token
                 }
                 servidor.sendto(json.dumps(respuesta).encode(), addr)
                 self.peers_conocidos[addr[0]] = time.time()
@@ -272,7 +291,8 @@ class P2P_Peer:
                 
                 sock.send(json.dumps({
                     "tipo": "BUSCAR",
-                    "query": query
+                    "query": query,
+                    "token": self.auth_token
                 }).encode())
                 
                 respuesta = json.loads(sock.recv(8192).decode())
@@ -320,7 +340,8 @@ class P2P_Peer:
             
             sock_ctrl.send(json.dumps({
                 "tipo": "SOLICITUD_DESCARGA",
-                "archivo": nombre_archivo
+                "archivo": nombre_archivo,
+                "token": self.auth_token
             }).encode())
             
             respuesta = json.loads(sock_ctrl.recv(1024).decode())
@@ -335,7 +356,8 @@ class P2P_Peer:
             
             sock_datos.send(json.dumps({
                 "tipo": "DESCARGA",
-                "archivo": nombre_archivo
+                "archivo": nombre_archivo,
+                "token": self.auth_token
             }).encode())
             
             ruta = self.ruta_descargas / nombre_archivo
