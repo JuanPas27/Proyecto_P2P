@@ -305,7 +305,11 @@ class P2P_Peer:
             print("Peer no conocido")
             return
         
-        # aqui
+        # si no se proporciona nombre completo del archivo, se busca en la lista guardada (puede cambiar despues)
+        # ademas proporciona la extension del archivo
+        for archive in self.results:
+            if nombre_archivo in archive:
+                nombre_archivo = self.results
 
         print(f"\nSolicitando descarga de '{nombre_archivo}' desde {peer_ip}...")
         
