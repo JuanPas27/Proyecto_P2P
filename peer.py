@@ -5,6 +5,7 @@ import os
 import time
 import hashlib
 from pathlib import Path
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
 class P2P_Peer:
     def __init__(self):
@@ -12,6 +13,10 @@ class P2P_Peer:
         self.puerto_control = 5000
         self.puerto_datos = 5001
         self.puerto_discovery = 5003
+
+        self.password_red = "el_shrek" 
+        self.auth_token = hashlib.sha256(self.password_red.encode()).hexdigest()
+        self.llave_aes = hashlib.sha256(self.password_red.encode()).digest()
         
         self.mi_id = hashlib.sha256(f"{self.mi_ip}:{self.puerto_control}".encode()).hexdigest()[:8]
         self.peers_conocidos = {}
@@ -32,6 +37,8 @@ class P2P_Peer:
         
         self.escanear_archivos()
         self.iniciar_servicios()
+
+        self.results = list()
     
     def obtener_ip_local(self):
         try:
@@ -130,7 +137,8 @@ class P2P_Peer:
             
             mensaje = json.dumps({
                 "tipo": "DISCOVERY",
-                "ip": self.mi_ip
+                "ip": self.mi_ip,
+                "token": self.auth_token
             })
             
             sock.sendto(mensaje.encode(), ('255.255.255.255', self.puerto_discovery))
@@ -141,6 +149,8 @@ class P2P_Peer:
                 try:
                     data, addr = sock.recvfrom(1024)
                     respuesta = json.loads(data.decode())
+                    if respuesta.get("token") != self.auth_token:
+                        return
                     
                     if respuesta["tipo"] == "DISCOVERY_RESPONSE" and addr[0] != self.mi_ip:
                         peers_encontrados.append(addr[0])
@@ -166,6 +176,11 @@ class P2P_Peer:
                 return
                 
             mensaje = json.loads(data)
+
+            if mensaje.get("token") != self.auth_token:
+                respuesta = {"tipo": "ERROR", "mensaje": "Autenticacion fallida"}
+                cliente.send(json.dumps(respuesta).encode())
+                return
             
             if mensaje["tipo"] == "BUSCAR":
                 self.manejar_busqueda(cliente, mensaje)
@@ -184,6 +199,10 @@ class P2P_Peer:
                 return
                 
             mensaje = json.loads(data)
+
+            if mensaje.get("token") != self.auth_token:
+                print(f"\nIntento de descarga bloqueado desde {addr[0]} (Token inválido)")
+                return
             
             if mensaje["tipo"] == "DESCARGA":
                 self.enviar_archivo(cliente, mensaje["archivo"])
@@ -196,10 +215,14 @@ class P2P_Peer:
     def manejar_discovery(self, servidor, data, addr):
         try:
             mensaje = json.loads(data.decode())
+
+            if mensaje.get("token") != self.auth_token:
+                return
             
             if mensaje["tipo"] == "DISCOVERY" and addr[0] != self.mi_ip:
                 respuesta = {
-                    "tipo": "DISCOVERY_RESPONSE"
+                    "tipo": "DISCOVERY_RESPONSE",
+                    "token": self.auth_token
                 }
                 servidor.sendto(json.dumps(respuesta).encode(), addr)
                 self.peers_conocidos[addr[0]] = time.time()
@@ -230,10 +253,19 @@ class P2P_Peer:
         archivo = mensaje["archivo"]
         
         if archivo in self.mis_archivos:
+            ruta_completa = self.mis_archivos[archivo]["ruta"]
+            md5_hash = hashlib.md5()
+
+            with open(ruta_completa, "rb") as f:
+                for chunk in iter(lambda: f.read(4096), b""):
+                    md5_hash.update(chunk)
+            hash_calculado = md5_hash.hexdigest()
+
             respuesta = {
                 "tipo": "DESCARGA_AUTORIZADA",
                 "archivo": archivo,
-                "tamaño": self.mis_archivos[archivo]["tamaño"]
+                "tamaño": self.mis_archivos[archivo]["tamaño"],
+                "md5": hash_calculado
             }
         else:
             respuesta = {
@@ -249,12 +281,18 @@ class P2P_Peer:
         if not ruta.exists():
             return
         
+        nonce = os.urandom(16)
+        cliente.send(nonce)
+        cipher = Cipher(algorithms.AES(self.llave_aes), modes.CTR(nonce))
+        encryptor = cipher.encryptor()
+        
         with open(ruta, 'rb') as f:
             while True:
                 chunk = f.read(65536)
                 if not chunk:
                     break
-                cliente.send(chunk)
+                chunk_encriptado = encryptor.update(chunk)
+                cliente.send(chunk_encriptado)
     
     def buscar(self, query):
         print(f"\nBuscando '{query}'...")
@@ -270,7 +308,8 @@ class P2P_Peer:
                 
                 sock.send(json.dumps({
                     "tipo": "BUSCAR",
-                    "query": query
+                    "query": query,
+                    "token": self.auth_token
                 }).encode())
                 
                 respuesta = json.loads(sock.recv(8192).decode())
@@ -288,6 +327,9 @@ class P2P_Peer:
         if resultados:
             print(f"Encontrados {len(resultados)} resultados:")
             for i, res in enumerate(resultados, 1):
+                if res['nombre'] not in self.results:
+                    self.results.append(res['nombre'])
+
                 tamaño_mb = res["tamaño"] / (1024*1024)
                 print(f"\n   {i}. {res['nombre']} ({tamaño_mb:.1f} MB)")
                 print(f"      Peer: {res['peer_id']} ({res['peer_ip']})")
@@ -301,6 +343,12 @@ class P2P_Peer:
             print("Peer no conocido")
             return
         
+        # si no se proporciona nombre completo del archivo, se busca en la lista guardada (puede cambiar despues)
+        # ademas proporciona la extension del archivo
+        for archive in self.results:
+            if nombre_archivo in archive:
+                nombre_archivo = archive
+
         print(f"\nSolicitando descarga de '{nombre_archivo}' desde {peer_ip}...")
         
         try:
@@ -309,7 +357,8 @@ class P2P_Peer:
             
             sock_ctrl.send(json.dumps({
                 "tipo": "SOLICITUD_DESCARGA",
-                "archivo": nombre_archivo
+                "archivo": nombre_archivo,
+                "token": self.auth_token
             }).encode())
             
             respuesta = json.loads(sock_ctrl.recv(1024).decode())
@@ -319,12 +368,15 @@ class P2P_Peer:
                 print(f"Error: {respuesta.get('mensaje', 'Desconocido')}")
                 return
             
+            md5_esperado = respuesta.get("md5")
+            
             sock_datos = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock_datos.connect((peer_ip, self.puerto_datos))
             
             sock_datos.send(json.dumps({
                 "tipo": "DESCARGA",
-                "archivo": nombre_archivo
+                "archivo": nombre_archivo,
+                "token": self.auth_token
             }).encode())
             
             ruta = self.ruta_descargas / nombre_archivo
@@ -332,21 +384,38 @@ class P2P_Peer:
             recibido = 0
             
             print(f"Tamaño: {tamaño/(1024*1024):.1f} MB")
+
+            nonce = sock_datos.recv(16)
+            cipher = Cipher(algorithms.AES(self.llave_aes), modes.CTR(nonce))
+            decryptor = cipher.decryptor()
+
+            md5_descarga = hashlib.md5()
             
             with open(ruta, 'wb') as f:
                 while recibido < tamaño:
                     chunk = sock_datos.recv(65536)
                     if not chunk:
                         break
-                    f.write(chunk)
+                    chunk_desencriptado = decryptor.update(chunk)
+                    f.write(chunk_desencriptado)
+                    md5_descarga.update(chunk_desencriptado)
                     recibido += len(chunk)
-                    
+
                     if recibido % (1024*1024) < 65536:
                         porcentaje = (recibido / tamaño) * 100
                         print(f"   Progreso: {porcentaje:.1f}% ({recibido/(1024*1024):.1f} MB)")
-            
+
             sock_datos.close()
             print(f"Descarga completada: {ruta}")
+
+            if md5_esperado:
+                md5_obtenido = md5_descarga.hexdigest()
+                if md5_obtenido == md5_esperado:
+                    print(f"Integridad verificada:MD5 coincide")
+                else:
+                    print(f"¡ADVERTENCIA! El archivo está corrupto o fue modificado.")
+                    print(f"   Esperábamos: {md5_esperado}")
+                    print(f"   Obtuvimos:   {md5_obtenido}")
             
         except Exception as e:
             print(f"Error en descarga: {e}")
