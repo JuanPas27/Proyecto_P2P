@@ -1,6 +1,7 @@
 import socket
 import threading
 import json
+import uuid
 from database import GestorBiblioteca
 
 class ServidorP2P:
@@ -30,27 +31,36 @@ class ServidorP2P:
 
     def atender_peticion(self, cliente):
         try:
-            # Recibimos y limpiamos el mensaje
             data = cliente.recv(1024).decode('utf-8').strip()
+            if not data: return
             
-            if not data:
-                return
+            partes = data.split("|")
+            comando = partes[0].lower()
 
-            print(f"[*] El cliente pidió: '{data}'")
-            
-            if data.lower() == "listar_libros":
-                # Forzamos una nueva consulta para asegurar que vemos lo último registrado
+            if comando == "listar_libros":
                 libros = self.db.listar_libros()
-                print(f"[*] Libros encontrados: {len(libros)}")
+                cliente.sendall(json.dumps(libros).encode('utf-8'))
+
+            elif comando == "solicitar_prestamo":
+                id_libro = partes[1]
+                token = str(uuid.uuid4())[:6].upper()
                 
-                respuesta = json.dumps(libros)
-                # Usamos sendall para asegurar que todo el JSON se envíe
-                cliente.sendall(respuesta.encode('utf-8'))
-                print("[*] Respuesta enviada con éxito.")
-            else:
-                cliente.sendall("ERROR_CMD".encode('utf-8'))
+                # Guardamos el token en la DB para que sea persistente
+                self.db.guardar_token_temporal(id_libro, token)
                 
+                print(f"\n[!] ACCIÓN REQUERIDA: Entrega el código {token} al usuario.")
+                cliente.sendall(f"TOKEN_GENERADO|{token}".encode('utf-8'))
+
+            elif comando == "confirmar_entrega":
+                id_libro, usuario, token_cliente = partes[1], partes[2], partes[3]
+                
+                # Validamos contra la DB
+                if self.db.validar_y_finalizar(id_libro, usuario, token_cliente):
+                    cliente.sendall("OK|Prestamo formalizado".encode('utf-8'))
+                else:
+                    cliente.sendall("ERROR|Token incorrecto".encode('utf-8'))
+
         except Exception as e:
-            print(f"❌ Error en el hilo de red: {e}")
+            print(f"Error en el hilo de red: {e}")
         finally:
             cliente.close()
