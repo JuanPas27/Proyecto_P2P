@@ -40,30 +40,32 @@ def ejecutar_cliente():
             id_libro = input("Ingresa el ID del libro que deseas pedir: ")
             
             try:
-                # PASO 1: Solicitar el Token (Simula ver el QR del dueño)
+                # PASO 1: Notificar al dueño que queremos el libro
                 c1 = conectar()
                 c1.sendall(f"solicitar_prestamo|{id_libro}".encode('utf-8'))
                 resp = c1.recv(1024).decode('utf-8')
                 
-                if "TOKEN_GENERADO" in resp:
-                    token_recibido = resp.split("|")[1]
-                    print(f"\n[!] SISTEMA: El dueño ha generado un código.")
-                    print(f"[!] Simulación de escaneo QR... Token obtenido: {token_recibido}")
-                    c1.close()
+                if "PROCESO_INICIADO" in resp:
+                    print("\n[!] Solicitud enviada.")
+                    print("[!] Por favor, pide al dueño el código de 6 dígitos que aparece en su pantalla.")
+                    
+                    # PASO 2: Entrada manual del Token (Simulación de escaneo QR)
+                    token_ingresado = input("\nIngresa el código de validación: ").strip().upper()
 
-                    # PASO 2: Confirmar la entrega física enviando el token de vuelta
-                    print("\nConfirmando entrega física con el servidor...")
+                    # PASO 3: Enviar el token ingresado para confirmar
+                    print("Validando código con el servidor...")
                     c2 = conectar()
-                    mensaje_confirmacion = f"confirmar_entrega|{id_libro}|{nombre_usuario}|{token_recibido}"
+                    mensaje_confirmacion = f"confirmar_entrega|{id_libro}|{nombre_usuario}|{token_ingresado}"
                     c2.sendall(mensaje_confirmacion.encode('utf-8'))
                     
                     resultado = c2.recv(1024).decode('utf-8')
-                    print(f"Resultado: {resultado}")
+                    print(f"\nResultado: {resultado}")
                     c2.close()
                 else:
-                    print(f"Error del servidor: {resp}")
+                    print(f"Error: {resp}")
+                c1.close()
             except Exception as e:
-                print(f"Error en el proceso de préstamo: {e}")
+                print(f"Error en el proceso: {e}")
 
         elif opcion == "3":
             break

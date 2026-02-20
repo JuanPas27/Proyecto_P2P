@@ -45,11 +45,15 @@ class ServidorP2P:
                 id_libro = partes[1]
                 token = str(uuid.uuid4())[:6].upper()
                 
-                # Guardamos el token en la DB para que sea persistente
                 self.db.guardar_token_temporal(id_libro, token)
                 
-                print(f"\n[!] ACCIÓN REQUERIDA: Entrega el código {token} al usuario.")
-                cliente.sendall(f"TOKEN_GENERADO|{token}".encode('utf-8'))
+                # Esto es lo que el DUEÑO verá en su pantalla
+                print(f"   TOKEN DE TRANSFERENCIA: {token}")
+                print("   Muéstralo al receptor para validar")
+                
+                # Al cliente solo le confirmamos que el proceso inició, 
+                # NO le enviamos el token.
+                cliente.sendall(f"PROCESO_INICIADO|El dueño tiene el código".encode('utf-8'))
 
             elif comando == "confirmar_entrega":
                 id_libro, usuario, token_cliente = partes[1], partes[2], partes[3]
