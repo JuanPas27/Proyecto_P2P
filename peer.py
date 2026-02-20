@@ -5,6 +5,7 @@ import os
 import time
 import hashlib
 from pathlib import Path
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
 class P2P_Peer:
     def __init__(self):
@@ -15,6 +16,7 @@ class P2P_Peer:
 
         self.password_red = "el_shrek" 
         self.auth_token = hashlib.sha256(self.password_red.encode()).hexdigest()
+        self.llave_aes = hashlib.sha256(self.password_red.encode()).digest()
         
         self.mi_id = hashlib.sha256(f"{self.mi_ip}:{self.puerto_control}".encode()).hexdigest()[:8]
         self.peers_conocidos = {}
@@ -270,12 +272,18 @@ class P2P_Peer:
         if not ruta.exists():
             return
         
+        nonce = os.urandom(16)
+        cliente.send(nonce)
+        cipher = Cipher(algorithms.AES(self.llave_aes), modes.CTR(nonce))
+        encryptor = cipher.encryptor()
+        
         with open(ruta, 'rb') as f:
             while True:
                 chunk = f.read(65536)
                 if not chunk:
                     break
-                cliente.send(chunk)
+                chunk_encriptado = encryptor.update(chunk)
+                cliente.send(chunk_encriptado)
     
     def buscar(self, query):
         print(f"\nBuscando '{query}'...")
@@ -365,13 +373,18 @@ class P2P_Peer:
             recibido = 0
             
             print(f"Tamaño: {tamaño/(1024*1024):.1f} MB")
+
+            nonce = sock_datos.recv(16)
+            cipher = Cipher(algorithms.AES(self.llave_aes), modes.CTR(nonce))
+            decryptor = cipher.decryptor()
             
             with open(ruta, 'wb') as f:
                 while recibido < tamaño:
                     chunk = sock_datos.recv(65536)
                     if not chunk:
                         break
-                    f.write(chunk)
+                    chunk_desencriptado = decryptor.update(chunk)
+                    f.write(chunk_desencriptado)
                     recibido += len(chunk)
                     
                     if recibido % (1024*1024) < 65536:
