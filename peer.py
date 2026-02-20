@@ -32,6 +32,8 @@ class P2P_Peer:
         
         self.escanear_archivos()
         self.iniciar_servicios()
+
+        self.results = list() # edwing was experimenting weird things
     
     def obtener_ip_local(self):
         try:
@@ -288,9 +290,11 @@ class P2P_Peer:
         if resultados:
             print(f"Encontrados {len(resultados)} resultados:")
             for i, res in enumerate(resultados, 1):
+                self.results.append(res['nombre']) # edwing was experimenting weird things
                 tamaño_mb = res["tamaño"] / (1024*1024)
                 print(f"\n   {i}. {res['nombre']} ({tamaño_mb:.1f} MB)")
                 print(f"      Peer: {res['peer_id']} ({res['peer_ip']})")
+                print(f"edwing was testing weird things\n{self.results}")
         else:
             print("No se encontraron resultados")
         
@@ -301,6 +305,8 @@ class P2P_Peer:
             print("Peer no conocido")
             return
         
+        # aqui
+
         print(f"\nSolicitando descarga de '{nombre_archivo}' desde {peer_ip}...")
         
         try:
