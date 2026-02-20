@@ -411,7 +411,7 @@ class P2P_Peer:
             if md5_esperado:
                 md5_obtenido = md5_descarga.hexdigest()
                 if md5_obtenido == md5_esperado:
-                    print(f"Integridad verificada: El archivo es perfecto (MD5 coincide).")
+                    print(f"Integridad verificada:MD5 coincide")
                 else:
                     print(f"¡ADVERTENCIA! El archivo está corrupto o fue modificado.")
                     print(f"   Esperábamos: {md5_esperado}")
