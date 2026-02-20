@@ -309,7 +309,7 @@ class P2P_Peer:
         # ademas proporciona la extension del archivo
         for archive in self.results:
             if nombre_archivo in archive:
-                nombre_archivo = self.results
+                nombre_archivo = archive
 
         print(f"\nSolicitando descarga de '{nombre_archivo}' desde {peer_ip}...")
         
