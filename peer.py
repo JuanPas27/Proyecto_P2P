@@ -623,6 +623,12 @@ class P2P_Peer:
             
             print(f"Tamaño: {tamaño/(1024*1024):.1f} MB")
 
+            nonce = sock_datos.recv(16)
+            cipher = Cipher(algorithms.AES(self.llave_aes), modes.CTR(nonce))
+            decryptor = cipher.decryptor()
+
+            md5_descarga = hashlib.md5()
+            
             # mid routine para pasar el progreso de descarga a la gui
             with open(ruta, 'wb') as f:
                 while recibido < tamaño:
@@ -646,29 +652,6 @@ class P2P_Peer:
             if callback_progress:
                 callback_progress(100.0)
 
-            sock_datos.close()
-            print(f"Descarga completada: {ruta}")
-
-            nonce = sock_datos.recv(16)
-            cipher = Cipher(algorithms.AES(self.llave_aes), modes.CTR(nonce))
-            decryptor = cipher.decryptor()
-
-            md5_descarga = hashlib.md5()
-            
-            with open(ruta, 'wb') as f:
-                while recibido < tamaño:
-                    chunk = sock_datos.recv(65536)
-                    if not chunk:
-                        break
-                    chunk_desencriptado = decryptor.update(chunk)
-                    f.write(chunk_desencriptado)
-                    md5_descarga.update(chunk_desencriptado)
-                    recibido += len(chunk)
-                    
-                    if recibido % (1024*1024) < 65536:
-                        porcentaje = (recibido / tamaño) * 100
-                        print(f"   Progreso: {porcentaje:.1f}% ({recibido/(1024*1024):.1f} MB)")
-            
             sock_datos.close()
             print(f"Descarga completada: {ruta}")
             
