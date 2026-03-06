@@ -356,7 +356,7 @@ class BibliotecaGUI:
             """
             try:
                 # se retorna el progreso al backend
-                self.nodo.descargar(titulo_seleccionado, ip_seleccionada, callback_progreso=actualizar_barra)
+                self.nodo.descargar(titulo_seleccionado, ip_seleccionada, callback_progress=actualizar_barra)
                 self.window.after(0, lambda: finalizar_descarga("¡Descarga Completada!", "#69ff6e"))
             except Exception as e:
                 self.window.after(0, lambda: finalizar_descarga(f"Error: {e}", "#ff5252"))
