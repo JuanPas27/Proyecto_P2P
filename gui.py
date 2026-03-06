@@ -10,9 +10,10 @@ import peer
 ctk.set_appearance_mode("dark")  # Modo oscuro por defecto
 ctk.set_default_color_theme("blue")  # Color de acento (botones azules)
 
+
 class BibliotecaGUI:
     def __init__(self):
-        self.nodo = peer.P2P_Peer() # Inicializar nodo P2P en segundo plano
+        self.nodo = peer.P2P_Peer()  # Inicializar nodo P2P en segundo plano
 
         # ventana principal con CustomTkinter
         self.window = ctk.CTk()
@@ -20,12 +21,12 @@ class BibliotecaGUI:
         self.window.geometry("850x600")
 
         # Configurar grid para que sea responsivo al maximizar
-        self.window.columnconfigure(0, weight=3) # Columna izquierda más ancha
-        self.window.columnconfigure(1, weight=1) # Columna derecha (peers)
-        self.window.rowconfigure(1, weight=1)    # La fila de las listas se expande verticalmente
+        self.window.columnconfigure(0, weight=3)  # Columna izquierda más ancha
+        self.window.columnconfigure(1, weight=1)  # Columna derecha (peers)
+        self.window.rowconfigure(1, weight=1)  # La fila de las listas se expande verticalmente
 
         self.widgets()
-        self.update_peers() # Iniciar bucle para refrescar peers
+        self.update_peers()  # Iniciar bucle para refrescar peers
 
     def widgets(self):
         """
@@ -47,10 +48,10 @@ class BibliotecaGUI:
         self.entry_buscar.pack(side="left", fill="x", expand=True, padx=(0, 10))
         self.entry_buscar.bind("<Return>", lambda event: self.buscar_archivos())
 
-        ctk.CTkButton(frame_busqueda, 
-                      font=("Aptos", 14, "bold"), 
-                      text="Buscar", 
-                      corner_radius=20, # redondeo de boton
+        ctk.CTkButton(frame_busqueda,
+                      font=("Aptos", 14, "bold"),
+                      text="Buscar",
+                      corner_radius=20,  # redondeo de boton
                       command=self.buscar_archivos).pack(side="left")
 
         ctk.CTkLabel(self.window,
@@ -139,7 +140,7 @@ class BibliotecaGUI:
         query = self.entry_buscar.get().strip()
         self.lista_resultados.delete(0, tk.END)
         self.lista_resultados.insert(tk.END, "Buscando en la red... espere.")
-        self.window.update() # actualiza la ventana
+        self.window.update()  # actualiza la ventana
 
         resultados = self.nodo.buscar(query)
         self.lista_resultados.delete(0, tk.END)
@@ -175,7 +176,7 @@ class BibliotecaGUI:
         vent = ctk.CTkToplevel(self.window)
         vent.title("Mis Compartidos")
         vent.geometry("450x400")
-        vent.attributes('-topmost', True) # Ayuda a que la ventana no se esconda
+        vent.attributes('-topmost', True)  # Ayuda a que la ventana no se esconda
 
         ctk.CTkLabel(vent,
                      font=("Aptos", 16, "bold"),
@@ -202,9 +203,9 @@ class BibliotecaGUI:
 
         # Scrollbar para ventana con muchos archivos
         scrollbar = ctk.CTkScrollbar(frame_lista, command=lista_compartidos.yview)
-        scrollbar.pack(side="right", fill="y", pady=10, padx=(0,5))
+        scrollbar.pack(side="right", fill="y", pady=10, padx=(0, 5))
         lista_compartidos.config(yscrollcommand=scrollbar.set)
-        
+
         def cargar_lista():
             """
             Revisa si hay archivos en la carpeta para compartir y los muestra en la gui
@@ -231,9 +232,10 @@ class BibliotecaGUI:
                 try:
                     destino = os.path.join(self.nodo.ruta_compartir, os.path.basename(ruta_archivo))
                     shutil.copy2(ruta_archivo, destino)
-                    self.nodo.escanear_archivos() 
-                    messagebox.showinfo("Compartir", f"Archivo agregado exitosamente:\n{os.path.basename(ruta_archivo)}")
-                    cargar_lista() 
+                    self.nodo.escanear_archivos()
+                    messagebox.showinfo("Compartir",
+                                        f"Archivo agregado exitosamente:\n{os.path.basename(ruta_archivo)}")
+                    cargar_lista()
                 except Exception as e:
                     messagebox.showerror("Error", f"No se pudo compartir el archivo: {e}")
 
@@ -284,93 +286,98 @@ class BibliotecaGUI:
     def abrir_ventana_descarga(self):
         """
         Abre la ventana donde se van a descargar los archivos.
-        La ventana cuenta con el boton de descarga, textbox para ingresar el titulo a descargar
-        y la ip que lo tiene
+        La ventana se abre una vez que se haya seleccionado con el mouse el archivo a descargar.
+        De la selección se obtiene el titulo y la ip.
         """
+        seleccion = self.lista_resultados.curselection()  # Metodo de selección con el mouse
+
+        # Valida la seleccion
+        if not seleccion:
+            messagebox.showwarning("Atención", "Por favor, selecciona un archivo de la lista de resultados primero.")
+            return
+
+        # Extrae el texto del elemento seleccionado
+        item_texto = self.lista_resultados.get(seleccion[0])
+
+        # Valida que no haya seleccionado los mensajes de "Buscando..." o "No se encontraron..."
+        if "IP:" not in item_texto:
+            messagebox.showwarning("Atención", "Selección no válida.")
+            return
+
+        # Separa el texto para sacar el título y la IP
+        try:
+            # El texto tiene el formato: " titulo.pdf  |  2.5 MB  |  IP: 192.168.1.5"
+            partes = item_texto.split("  |  ")
+            titulo_seleccionado = partes[0].strip()  # elimina espacios extra
+            ip_seleccionada = partes[2].replace("IP:", "").strip()
+        except Exception as e:
+            messagebox.showerror("Error", "No se pudo leer la información del archivo.")
+            return
+
+        # crea la ventana de progreso de descarga
         vent = ctk.CTkToplevel(self.window)
-        vent.title("Descargar Archivo")
-        vent.geometry("400x300")
+        vent.title("Descargando...")
+        vent.geometry("400x200")
         vent.attributes('-topmost', True)
 
-        # Grid layout para el formulario
-        vent.columnconfigure(0, weight=1)
-        vent.columnconfigure(1, weight=2)
-
         ctk.CTkLabel(vent,
-                     font=("Aptos", 14),
-                     text="Ingresa título:").grid(row=0,
-                                                  column=0,
-                                                  padx=10,
-                                                  pady=(30, 15),
-                                                  sticky="e")
-        entry_titulo = ctk.CTkEntry(vent, width=200)
-        entry_titulo.grid(row=0,
-                          column=1,
-                          padx=10,
-                          pady=(30, 15),
-                          sticky="w")
+                     font=("Aptos", 14, "bold"),
+                     text=f"Descargando: {titulo_seleccionado}").pack(pady=(20, 5))
+        ctk.CTkLabel(vent, font=("Aptos", 12),
+                     text=f"Desde: {ip_seleccionada}").pack(pady=(0, 15))
 
-        ctk.CTkLabel(vent,
-                     font=("Aptos", 14),
-                     text="Ingresa IP:").grid(row=1,
-                                              column=0,
-                                              padx=10,
-                                              pady=10,
-                                              sticky="e")
-        entry_ip = ctk.CTkEntry(vent, width=200)
-        entry_ip.grid(row=1, column=1, padx=10, pady=10, sticky="w")
+        progreso = ctk.CTkProgressBar(vent,
+                                      orientation="horizontal",
+                                      mode="determinate",
+                                      width=300)
+        progreso.pack(pady=10)
+        progreso.set(0)  # inicia animacion de descarga en 0
 
-        # Barra de progreso
-        progreso = ctk.CTkProgressBar(vent, orientation="horizontal", mode="indeterminate", width=300)
-        progreso.grid(row=2, column=0, columnspan=2, pady=20)
-        progreso.set(0) # Inicia vacía
-        
-        lbl_estado = ctk.CTkLabel(vent, text="", font=("Aptos", 12))
-        lbl_estado.grid(row=3, column=0, columnspan=2)
+        lbl_estado = ctk.CTkLabel(vent,
+                                  text="Conectando... 0%",
+                                  font=("Aptos", 12),
+                                  text_color="#52a8ff")
+        lbl_estado.pack(pady=5)
 
-        def ejecutar_descarga():
+        def actualizar_barra(porcentaje):
             """
-            Usa el metodo para descargar archivos
+            Actualiza la barra de porcentaje en tiempo real
             """
-            titulo = entry_titulo.get().strip()
-            ip = entry_ip.get().strip()
-            
-            if not titulo or not ip:
-                lbl_estado.configure(text="Por favor ingresa todos los datos.",
-                                     text_color="#ff5252")
-                return
+            # CustomTkinter usa valores de 0.0 a 1.0 para la barra
+            valor_barra = porcentaje / 100.0
 
-            lbl_estado.configure(text="Descargando...",
-                                 text_color="#52a8ff")
-            progreso.start() # Iniciar animación de descarga
-            btn_descargar.configure(state="disabled")
+            # Usamos after(0, ...) para actualizar la GUI de forma segura desde otro hilo
+            self.window.after(0, lambda: [progreso.set(valor_barra),
+                                          lbl_estado.configure(text=f"Descargando... {porcentaje:.1f}%")])
 
-            def hilo_descarga():
-                """
-                Proceso de descarga en sí
-                """
-                try:
-                    self.nodo.descargar(titulo, ip)
-                    self.window.after(0, lambda: finalizar_descarga("¡Descarga Completada!",
-                                                                    "#69ff6e"))
-                except Exception as e:
-                    self.window.after(0, lambda: finalizar_descarga(f"Error: {e}",
-                                                                    "#ff5252"))
+        def hilo_descarga():
+            """
+            Ejecuta la descarga en segundo plano
+            """
+            try:
+                # se retorna el progreso al backend
+                self.nodo.descargar(titulo_seleccionado, ip_seleccionada, callback_progreso=actualizar_barra)
+                self.window.after(0, lambda: finalizar_descarga("¡Descarga Completada!", "#69ff6e"))
+            except Exception as e:
+                self.window.after(0, lambda: finalizar_descarga(f"Error: {e}", "#ff5252"))
 
-            def finalizar_descarga(mensaje, color):
-                progreso.stop()
-                progreso.set(1) # Llenar barra al terminar
-                lbl_estado.configure(text=mensaje, text_color=color)
-                btn_descargar.configure(state="normal")
+        def finalizar_descarga(mensaje, color):
+            """
+            Termina ejecucion de descarga y se llena la barra de progreso
+            """
+            progreso.set(1)  # llenado de la barra
+            lbl_estado.configure(text=mensaje, text_color=color)
 
-            threading.Thread(target=hilo_descarga, daemon=True).start()
+            # botón para cerrar ventanita cuando termine
+            ctk.CTkButton(vent,
+                          text="Cerrar",
+                          font=("Aptos", 12),
+                          corner_radius=20,
+                          width=100,
+                          command=vent.destroy).pack(pady=10)
 
-        btn_descargar = ctk.CTkButton(vent,
-                                      font=("Aptos", 14, "bold"),
-                                      text="Comenzar Descarga",
-                                      corner_radius=20,
-                                      command=ejecutar_descarga)
-        btn_descargar.grid(row=4, column=0, columnspan=2, pady=10)
+        # Inicia el hilo de descarga automáticamente sin esperar un clic extra
+        threading.Thread(target=hilo_descarga, daemon=True).start()
 
     def iniciar(self):
         """
@@ -378,9 +385,11 @@ class BibliotecaGUI:
         """
         self.window.mainloop()
 
+
 def main():
     app = BibliotecaGUI()
     app.iniciar()
+
 
 if __name__ == "__main__":
     main()

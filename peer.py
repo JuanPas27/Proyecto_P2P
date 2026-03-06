@@ -571,7 +571,7 @@ class P2P_Peer:
         
         return resultados
     
-    def descargar(self, nombre_archivo, peer_ip):
+    def descargar(self, nombre_archivo, peer_ip, callback_progress=None):
         """Descarga un archivo de un peer"""
         if peer_ip not in self.peers_conocidos:
             print("Peer no conocido")
@@ -622,6 +622,32 @@ class P2P_Peer:
             recibido = 0
             
             print(f"Tamaño: {tamaño/(1024*1024):.1f} MB")
+
+            # mid routine para pasar el progreso de descarga a la gui
+            with open(ruta, 'wb') as f:
+                while recibido < tamaño:
+                    chunk = sock_datos.recv(65536)
+                    if not chunk:
+                        break
+                    chunk_desencriptado = decryptor.update(chunk)
+                    f.write(chunk_desencriptado)
+                    md5_descarga.update(chunk_desencriptado)
+                    recibido += len(chunk)
+                    
+                    if recibido % (1024*1024) < 65536:
+                        porcentaje = (recibido / tamaño) * 100
+                        print(f"   Progreso: {porcentaje:.1f}% ({recibido/(1024*1024):.1f} MB)")
+                        
+                        # Avisamos a la GUI el progreso actual
+                        if callback_progress:
+                            callback_progress(porcentaje)
+            
+            # Aseguramos llegar al 100% al terminar
+            if callback_progress:
+                callback_progress(100.0)
+
+            sock_datos.close()
+            print(f"Descarga completada: {ruta}")
 
             nonce = sock_datos.recv(16)
             cipher = Cipher(algorithms.AES(self.llave_aes), modes.CTR(nonce))
