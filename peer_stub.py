@@ -920,7 +920,7 @@ class P2P_Peer:
         
         return resultados
     
-    def descargar(self, nombre_archivo, peer_ip):
+    def descargar(self, nombre_archivo, peer_ip, callback_progress=None):
         if peer_ip not in self.peers_conocidos:
             print("Peer no conocido")
             return
@@ -977,7 +977,15 @@ class P2P_Peer:
                     if recibido % (1024*1024) < 65536:
                         porcentaje = (recibido / tamaño) * 100
                         print(f"   Progreso: {porcentaje:.1f}% ({recibido/(1024*1024):.1f} MB)")
+                        
+                        # Avisamos a la GUI
+                        if callback_progress:
+                            callback_progress(porcentaje)
             
+            # Aseguramos el 100% al terminar
+            if callback_progress:
+                callback_progress(100.0)
+
             sock_datos.close()
             print(f"Descarga completada: {ruta}")
             
