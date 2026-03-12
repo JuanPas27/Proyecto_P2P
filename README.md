@@ -2,3 +2,4 @@
 
 ## Librerias adicionales
 pip install criptography
+pip install customtkinter
