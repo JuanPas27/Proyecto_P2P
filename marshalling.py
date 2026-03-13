@@ -90,12 +90,13 @@ class Marshalling:
             return struct.pack(formato, codigo, len(archivo_bytes), archivo_bytes,
                              kwargs['tamaño'], md5_bytes, token_bytes)
         
-        # DESCARGA: archivo + token
+        # DESCARGA: archivo + token + offset
         elif tipo == 'DESCARGA':
             archivo_bytes = kwargs['archivo'].encode()
             token_bytes = kwargs['token'].encode()
-            formato = f'!B B {len(archivo_bytes)}s {len(token_bytes)}s'
-            return struct.pack(formato, codigo, len(archivo_bytes), archivo_bytes, token_bytes)
+            offset = kwargs.get('offset', 0)
+            formato = f'!B B {len(archivo_bytes)}s Q {len(token_bytes)}s'
+            return struct.pack(formato, codigo, len(archivo_bytes), archivo_bytes, offset, token_bytes)
         
         # NUEVO_ARCHIVO: ip + peer_id + archivo + tamaño + token
         elif tipo == 'NUEVO_ARCHIVO':
@@ -270,8 +271,10 @@ class Marshalling:
                 offset += 1
                 archivo = data[offset:offset+archivo_len].decode()
                 offset += archivo_len
+                offset_bytes = struct.unpack('!Q', data[offset:offset+8])[0]
+                offset += 8
                 token = data[offset:].decode()
-                return {'tipo': tipo, 'archivo': archivo, 'token': token}
+                return {'tipo': tipo, 'archivo': archivo, 'offset': offset_bytes, 'token': token}
             
             # NUEVO_ARCHIVO
             elif tipo == 'NUEVO_ARCHIVO':

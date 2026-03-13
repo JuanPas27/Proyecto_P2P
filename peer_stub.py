@@ -200,19 +200,19 @@ class P2P_Peer:
     
     def manejar_datos(self, cliente, addr):
         try:
-            data = cliente.recv(1024).decode()
+            data = cliente.recv(1024)
             if not data:
                 return
-                
-            mensaje = json.loads(data)
-
+            mensaje = Marshalling.unmarshal(data)
+            if not mensaje:
+                return
             if mensaje.get("token") != self.auth_token:
                 print(f"\nIntento de descarga bloqueado desde {addr[0]}")
                 return
-            
             if mensaje["tipo"] == "DESCARGA":
-                self.enviar_archivo(cliente, mensaje["archivo"])
-                
+                archivo = mensaje["archivo"]
+                offset = mensaje.get("offset", 0)
+                self.enviar_archivo(cliente, archivo, offset)
         except Exception as e:
             print(f"Error en datos: {e}")
         finally:
@@ -437,30 +437,67 @@ class P2P_Peer:
                 return
             
             md5_esperado = respuesta.get("md5")
+            tamaño = respuesta["tamaño"]
+            
+            ruta = self.RUTA_DESCARGAS / nombre_archivo
+            offset = 0
+            if ruta.exists():
+                tamaño_actual = ruta.stat().st_size
+                if tamaño_actual < tamaño:
+                    op = input(f"El archivo {nombre_archivo} ya existe pero está incompleto ({tamaño_actual}/{tamaño} bytes). ¿Reanudar? (s/n): ").strip().lower()
+                    if op == 's':
+                        offset = tamaño_actual
+                    else:
+                        # Si no se reanuda, eliminar el archivo parcial para empezar de cero
+                        ruta.unlink()
+                elif tamaño_actual == tamaño:
+                    print("El archivo ya está completo. No es necesario descargar.")
+                    return
+                else:
+                    print("El archivo a cambiado (Sobreescribir)")
+                    ruta.unlink()
+
+            print(f"Tamaño: {tamaño/(1024*1024):.1f} MB")
+            if offset > 0:
+                print(f"Reanudando desde el byte {offset} ({offset/(1024*1024):.1f} MB)")
 
             sock_datos = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock_datos.settimeout(10)
             sock_datos.connect((peer_ip, self.puerto_datos))
             
-            sock_datos.send(json.dumps({
-                "tipo": "DESCARGA",
-                "archivo": nombre_archivo,
-                "token": self.auth_token
-            }).encode())
+            # Enviar solicitud de descarga con offset
+            msg_descarga = Marshalling.marshal('DESCARGA',
+                                               archivo=nombre_archivo,
+                                               token=self.auth_token,
+                                               offset=offset)
+            sock_datos.send(msg_descarga)
             
-            ruta = self.RUTA_DESCARGAS / nombre_archivo
-            tamaño = respuesta["tamaño"]
-            recibido = 0
-            
-            print(f"Tamaño: {tamaño/(1024*1024):.1f} MB")
-
             nonce = sock_datos.recv(16)
             cipher = Cipher(algorithms.AES(self.llave_aes), modes.CTR(nonce))
             decryptor = cipher.decryptor()
 
+            # Preparar archivo para escritura
+            try:
+                # Si offset > 0, continuar descarga
+                if offset > 0:
+                    f = open(ruta, 'r+b')
+                    f.seek(offset)
+                # de lo contrario empezar de cero
+                else:
+                    f = open(ruta, 'wb')
+            except FileNotFoundError:
+                # Si offset > 0 pero el archivo no existe, empezar de cero
+                f = open(ruta, 'wb')
+                offset = 0
+
             md5_descarga = hashlib.md5()
-            
-            with open(ruta, 'wb') as f:
+            if offset > 0:
+                # Leer el archivo existente para actualizar MD5 hasta offset
+                with open(ruta, 'rb') as tmp:
+                    md5_descarga.update(tmp.read(offset))
+
+            recibido = offset
+            try:
                 while recibido < tamaño:
                     chunk = sock_datos.recv(65536)
                     if not chunk:
@@ -473,31 +510,37 @@ class P2P_Peer:
                     if recibido % (1024*1024) < 65536:
                         porcentaje = (recibido / tamaño) * 100
                         print(f"   Progreso: {porcentaje:.1f}% ({recibido/(1024*1024):.1f} MB)")
-                        
-                        # Avisamos a la GUI
                         if callback_progress:
                             callback_progress(porcentaje)
-            
-            # Aseguramos el 100% al terminar
-            if callback_progress:
-                callback_progress(100.0)
+            finally:
+                f.close()
+                sock_datos.close()
 
-            sock_datos.close()
-            print(f"Descarga completada: {ruta}")
-            
-            if md5_esperado:
-                md5_obtenido = md5_descarga.hexdigest()
-                if md5_obtenido == md5_esperado:
-                    print(f"Integridad verificada: MD5 coincide")
-                else:
-                    print(f"ADVERTENCIA: El archivo está corrupto o fue modificado.")
+            if recibido >= tamaño:
+                print(f"Descarga completada: {ruta}")
+                if callback_progress:
+                    callback_progress(100.0)
+                if md5_esperado:
+                    md5_obtenido = md5_descarga.hexdigest()
+                    if md5_obtenido == md5_esperado:
+                        print(f"Integridad verificada: MD5 coincide")
+                    else:
+                        print(f"ADVERTENCIA: El archivo está corrupto o fue modificado.")
+            else:
+                print("Descarga interrumpida. El archivo parcial se guardó.")
             
         except Exception as e:
             print(f"Error en descarga: {e}")
     
-    def enviar_archivo(self, cliente, archivo):
+    def enviar_archivo(self, cliente, archivo, offset=0):
         ruta = self.RUTA_COMPARTIR / archivo
         if not ruta.exists():
+            return
+        
+        # Validar offset
+        file_size = ruta.stat().st_size
+        if offset >= file_size:
+            # Nada que enviar
             return
         
         nonce = os.urandom(16)
@@ -506,11 +549,14 @@ class P2P_Peer:
         encryptor = cipher.encryptor()
         
         with open(ruta, 'rb') as f:
+            if offset > 0:
+                f.seek(offset)
             while True:
                 chunk = f.read(65536)
                 if not chunk:
                     break
-                cliente.send(encryptor.update(chunk))
+                encrypted_chunk = encryptor.update(chunk)
+                cliente.send(encrypted_chunk)
     
     def menu(self):
         while self.corriendo:
