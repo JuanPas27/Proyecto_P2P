@@ -126,7 +126,8 @@ class PeerSkeleton:
             peer_id = mensaje['peer_id']
             archivo = mensaje['archivo']
             tamaño = mensaje['tamaño']
-            
+            # Añadir a file_peers
+            self.peer.file_peers.setdefault(archivo, []).append((peer_ip, peer_id))
             print(f"\nNUEVO ARCHIVO EN LA RED:")
             print(f"   Archivo: {archivo} ({tamaño/(1024*1024):.1f} MB)")
             print(f"   Peer: {peer_id} ({peer_ip})")
