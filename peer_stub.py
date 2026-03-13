@@ -6,563 +6,37 @@ import time
 import hashlib
 from pathlib import Path
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-import struct
 
-# Marshalling/Unmarshalling
-class Marshalling:
-    """Realiza la serialización/deserialización de los mensajes"""
-    
-    TIPOS_MENSAJE = {
-        'DISCOVERY': 0x01,
-        'DISCOVERY_RESPONSE': 0x02,
-        'HEARTBEAT': 0x03,
-        'BUSCAR': 0x04,
-        'RESULTADOS': 0x05,
-        'SOLICITUD_DESCARGA': 0x06,
-        'DESCARGA_AUTORIZADA': 0x07,
-        'DESCARGA': 0x08,
-        'NUEVO_ARCHIVO': 0x09,
-        'NUEVO_PEER': 0x0A,
-        'SOLICITUD_PEERS': 0x0B,
-        'LISTA_PEERS': 0x0C,
-        'ERROR': 0xFF
-    }
-    
-    CODIGOS_TIPO = {v: k for k, v in TIPOS_MENSAJE.items()}
-    
-    @staticmethod
-    def marshal(tipo, **kwargs):
-        """Convierte mensaje a bytes según su tipo"""
-        codigo = Marshalling.TIPOS_MENSAJE.get(tipo, 0xFF)
-        
-        # DISCOVERY: ip + token
-        if tipo == 'DISCOVERY':
-            ip_bytes = kwargs['ip'].encode()
-            token_bytes = kwargs['token'].encode()
-            formato = f'!B B {len(ip_bytes)}s {len(token_bytes)}s'
-            return struct.pack(formato, codigo, len(ip_bytes), ip_bytes, token_bytes)
-        
-        # DISCOVERY_RESPONSE: solo token
-        elif tipo == 'DISCOVERY_RESPONSE':
-            token_bytes = kwargs['token'].encode()
-            formato = f'!B {len(token_bytes)}s'
-            return struct.pack(formato, codigo, token_bytes)
-        
-        # HEARTBEAT: ip + timestamp + token
-        elif tipo == 'HEARTBEAT':
-            ip_bytes = kwargs['ip'].encode()
-            token_bytes = kwargs['token'].encode()
-            formato = f'!B Q B {len(ip_bytes)}s {len(token_bytes)}s'
-            return struct.pack(formato, codigo, kwargs['timestamp'], 
-                             len(ip_bytes), ip_bytes, token_bytes)
-        
-        # BUSCAR: query + token
-        elif tipo == 'BUSCAR':
-            query_bytes = kwargs['query'].encode()
-            token_bytes = kwargs['token'].encode()
-            formato = f'!B B {len(query_bytes)}s {len(token_bytes)}s'
-            return struct.pack(formato, codigo, len(query_bytes), query_bytes, token_bytes)
-        
-        # RESULTADOS: lista de resultados
-        elif tipo == 'RESULTADOS':
-            resultados = kwargs['resultados']
-            # código y número de resultados
-            data = struct.pack('!B I', codigo, len(resultados))
-            
-            for r in resultados:
-                nombre_bytes = r['nombre'].encode()
-                peer_id_bytes = r['peer_id'].encode()
-                peer_ip_bytes = r['peer_ip'].encode()
-                
-                data += struct.pack(f'!I Q B {len(nombre_bytes)}s B {len(peer_id_bytes)}s B {len(peer_ip_bytes)}s',
-                                  r['tamaño'],
-                                  len(nombre_bytes), nombre_bytes,
-                                  len(peer_id_bytes), peer_id_bytes,
-                                  len(peer_ip_bytes), peer_ip_bytes)
-            return data
-        
-        # SOLICITUD_DESCARGA: archivo + token
-        elif tipo == 'SOLICITUD_DESCARGA':
-            archivo_bytes = kwargs['archivo'].encode()
-            token_bytes = kwargs['token'].encode()
-            formato = f'!B B {len(archivo_bytes)}s {len(token_bytes)}s'
-            return struct.pack(formato, codigo, len(archivo_bytes), archivo_bytes, token_bytes)
-        
-        # DESCARGA_AUTORIZADA: archivo + tamaño + md5 + token
-        elif tipo == 'DESCARGA_AUTORIZADA':
-            archivo_bytes = kwargs['archivo'].encode()
-            md5_bytes = kwargs['md5'].encode()
-            token_bytes = kwargs['token'].encode()
-            formato = f'!B B {len(archivo_bytes)}s Q 32s {len(token_bytes)}s'
-            return struct.pack(formato, codigo, len(archivo_bytes), archivo_bytes,
-                             kwargs['tamaño'], md5_bytes, token_bytes)
-        
-        # DESCARGA: archivo + token
-        elif tipo == 'DESCARGA':
-            archivo_bytes = kwargs['archivo'].encode()
-            token_bytes = kwargs['token'].encode()
-            formato = f'!B B {len(archivo_bytes)}s {len(token_bytes)}s'
-            return struct.pack(formato, codigo, len(archivo_bytes), archivo_bytes, token_bytes)
-        
-        # NUEVO_ARCHIVO: ip + peer_id + archivo + tamaño + token
-        elif tipo == 'NUEVO_ARCHIVO':
-            ip_bytes = kwargs['ip'].encode()
-            peer_id_bytes = kwargs['peer_id'].encode()
-            archivo_bytes = kwargs['archivo'].encode()
-            token_bytes = kwargs['token'].encode()
-            
-            formato = f'!B B {len(ip_bytes)}s B {len(peer_id_bytes)}s B {len(archivo_bytes)}s Q {len(token_bytes)}s'
-            return struct.pack(formato, codigo,
-                             len(ip_bytes), ip_bytes,
-                             len(peer_id_bytes), peer_id_bytes,
-                             len(archivo_bytes), archivo_bytes,
-                             kwargs['tamaño'], token_bytes)
-        
-        # NUEVO_PEER: ip + token
-        elif tipo == 'NUEVO_PEER':
-            ip_bytes = kwargs['ip'].encode()
-            token_bytes = kwargs['token'].encode()
-            formato = f'!B B {len(ip_bytes)}s {len(token_bytes)}s'
-            return struct.pack(formato, codigo, len(ip_bytes), ip_bytes, token_bytes)
-        
-        # SOLICITUD_PEERS: token
-        elif tipo == 'SOLICITUD_PEERS':
-            token_bytes = kwargs['token'].encode()
-            formato = f'!B {len(token_bytes)}s'
-            return struct.pack(formato, codigo, token_bytes)
-        
-        # LISTA_PEERS: lista de ips + token
-        elif tipo == 'LISTA_PEERS':
-            peers = kwargs['peers']
-            token_bytes = kwargs['token'].encode()
-            
-            data = struct.pack('!B I', codigo, len(peers))
-            for ip in peers:
-                ip_bytes = ip.encode()
-                data += struct.pack(f'!B {len(ip_bytes)}s', len(ip_bytes), ip_bytes)
-            data += struct.pack(f'!{len(token_bytes)}s', token_bytes)
-            return data
-        
-        # ERROR: mensaje + token
-        elif tipo == 'ERROR':
-            msg_bytes = kwargs['mensaje'].encode()
-            token_bytes = kwargs.get('token', '').encode()
-            formato = f'!B B {len(msg_bytes)}s {len(token_bytes)}s'
-            return struct.pack(formato, codigo, len(msg_bytes), msg_bytes, token_bytes)
-        
-        else:
-            # Fallback a JSON para tipos no implementados
-            return json.dumps({'tipo': codigo, **kwargs}).encode()
-    
-    @staticmethod
-    def unmarshal(data):
-        """Reconstruir mensaje desde bytes"""
-        if not data:
-            return None
-        
-        try:
-            # código del mensaje (primer byte)
-            codigo = data[0]
-            
-            if codigo not in Marshalling.CODIGOS_TIPO:
-                # código desconocido con JSON
-                return json.loads(data.decode())
-            
-            tipo = Marshalling.CODIGOS_TIPO[codigo]
-            offset = 1 # evitar primer byte
-            
-            # DISCOVERY
-            if tipo == 'DISCOVERY':
-                ip_len = struct.unpack('!B', data[offset:offset+1])[0]
-                offset += 1
-                ip = data[offset:offset+ip_len].decode()
-                offset += ip_len
-                token = data[offset:].decode()
-                return {'tipo': tipo, 'ip': ip, 'token': token}
-            
-            # DISCOVERY_RESPONSE
-            elif tipo == 'DISCOVERY_RESPONSE':
-                token = data[offset:].decode()
-                return {'tipo': tipo, 'token': token}
-            
-            # HEARTBEAT
-            elif tipo == 'HEARTBEAT':
-                timestamp = struct.unpack('!Q', data[offset:offset+8])[0]
-                offset += 8
-                ip_len = struct.unpack('!B', data[offset:offset+1])[0]
-                offset += 1
-                ip = data[offset:offset+ip_len].decode()
-                offset += ip_len
-                token = data[offset:].decode()
-                return {'tipo': tipo, 'ip': ip, 'timestamp': timestamp, 'token': token}
-            
-            # BUSCAR
-            elif tipo == 'BUSCAR':
-                query_len = struct.unpack('!B', data[offset:offset+1])[0]
-                offset += 1
-                query = data[offset:offset+query_len].decode()
-                offset += query_len
-                token = data[offset:].decode()
-                return {'tipo': tipo, 'query': query, 'token': token}
-            
-            # RESULTADOS
-            elif tipo == 'RESULTADOS':
-                num_resultados = struct.unpack('!I', data[offset:offset+4])[0]
-                offset += 4
-                resultados = []
-                
-                for _ in range(num_resultados):
-                    tamaño = struct.unpack('!I', data[offset:offset+4])[0]
-                    offset += 4
-                    
-                    nombre_len = struct.unpack('!Q', data[offset:offset+8])[0]
-                    offset += 8
-                    nombre = data[offset:offset+nombre_len].decode()
-                    offset += nombre_len
-                    
-                    peer_id_len = struct.unpack('!B', data[offset:offset+1])[0]
-                    offset += 1
-                    peer_id = data[offset:offset+peer_id_len].decode()
-                    offset += peer_id_len
-                    
-                    peer_ip_len = struct.unpack('!B', data[offset:offset+1])[0]
-                    offset += 1
-                    peer_ip = data[offset:offset+peer_ip_len].decode()
-                    offset += peer_ip_len
-                    
-                    resultados.append({
-                        'nombre': nombre,
-                        'tamaño': tamaño,
-                        'peer_id': peer_id,
-                        'peer_ip': peer_ip
-                    })
-                
-                return {'tipo': tipo, 'resultados': resultados}
-            
-            # SOLICITUD_DESCARGA
-            elif tipo == 'SOLICITUD_DESCARGA':
-                archivo_len = struct.unpack('!B', data[offset:offset+1])[0]
-                offset += 1
-                archivo = data[offset:offset+archivo_len].decode()
-                offset += archivo_len
-                token = data[offset:].decode()
-                return {'tipo': tipo, 'archivo': archivo, 'token': token}
-            
-            # DESCARGA_AUTORIZADA
-            elif tipo == 'DESCARGA_AUTORIZADA':
-                archivo_len = struct.unpack('!B', data[offset:offset+1])[0]
-                offset += 1
-                archivo = data[offset:offset+archivo_len].decode()
-                offset += archivo_len
-                
-                tamaño = struct.unpack('!Q', data[offset:offset+8])[0]
-                offset += 8
-                
-                md5 = data[offset:offset+32].decode().strip('\x00')
-                offset += 32
-                
-                token = data[offset:].decode()
-                
-                return {
-                    'tipo': tipo,
-                    'archivo': archivo,
-                    'tamaño': tamaño,
-                    'md5': md5,
-                    'token': token
-                }
-            
-            # DESCARGA
-            elif tipo == 'DESCARGA':
-                archivo_len = struct.unpack('!B', data[offset:offset+1])[0]
-                offset += 1
-                archivo = data[offset:offset+archivo_len].decode()
-                offset += archivo_len
-                token = data[offset:].decode()
-                return {'tipo': tipo, 'archivo': archivo, 'token': token}
-            
-            # NUEVO_ARCHIVO
-            elif tipo == 'NUEVO_ARCHIVO':
-                ip_len = struct.unpack('!B', data[offset:offset+1])[0]
-                offset += 1
-                ip = data[offset:offset+ip_len].decode()
-                offset += ip_len
-                
-                peer_id_len = struct.unpack('!B', data[offset:offset+1])[0]
-                offset += 1
-                peer_id = data[offset:offset+peer_id_len].decode()
-                offset += peer_id_len
-                
-                archivo_len = struct.unpack('!B', data[offset:offset+1])[0]
-                offset += 1
-                archivo = data[offset:offset+archivo_len].decode()
-                offset += archivo_len
-                
-                tamaño = struct.unpack('!Q', data[offset:offset+8])[0]
-                offset += 8
-                
-                token = data[offset:].decode()
-                
-                return {
-                    'tipo': tipo,
-                    'ip': ip,
-                    'peer_id': peer_id,
-                    'archivo': archivo,
-                    'tamaño': tamaño,
-                    'token': token
-                }
-            
-            # NUEVO_PEER
-            elif tipo == 'NUEVO_PEER':
-                ip_len = struct.unpack('!B', data[offset:offset+1])[0]
-                offset += 1
-                ip = data[offset:offset+ip_len].decode()
-                offset += ip_len
-                token = data[offset:].decode()
-                return {'tipo': tipo, 'ip': ip, 'token': token}
-            
-            # SOLICITUD_PEERS
-            elif tipo == 'SOLICITUD_PEERS':
-                token = data[offset:].decode()
-                return {'tipo': tipo, 'token': token}
-            
-            # LISTA_PEERS
-            elif tipo == 'LISTA_PEERS':
-                num_peers = struct.unpack('!I', data[offset:offset+4])[0]
-                offset += 4
-                
-                peers = []
-                for _ in range(num_peers):
-                    ip_len = struct.unpack('!B', data[offset:offset+1])[0]
-                    offset += 1
-                    ip = data[offset:offset+ip_len].decode()
-                    offset += ip_len
-                    peers.append(ip)
-                
-                token = data[offset:].decode()
-                
-                return {'tipo': tipo, 'peers': peers, 'token': token}
-            
-            # ERROR
-            elif tipo == 'ERROR':
-                msg_len = struct.unpack('!B', data[offset:offset+1])[0]
-                offset += 1
-                mensaje = data[offset:offset+msg_len].decode()
-                offset += msg_len
-                token = data[offset:].decode() if offset < len(data) else ''
-                return {'tipo': tipo, 'mensaje': mensaje, 'token': token}
-            
-        except Exception as e:
-            print(f"Error en unmarshal: {e}")
-            # Fallback a JSON
-            try:
-                return json.loads(data.decode())
-            except:
-                return None
-        
-        return None
-
-# Stubs (clente)
-class PeerStub:
-    def __init__(self, peer_ip, puerto_control, auth_token):
-        self.peer_ip = peer_ip
-        self.puerto_control = puerto_control
-        self.auth_token = auth_token
-        self.timeout = 5
-    
-    def buscar(self, query):
-        try:
-            mensaje = Marshalling.marshal('BUSCAR', 
-                                         query=query,
-                                         token=self.auth_token)
-            
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-                sock.settimeout(self.timeout)
-                sock.connect((self.peer_ip, self.puerto_control))
-                sock.send(mensaje)
-                
-                respuesta = sock.recv(8192)
-                return Marshalling.unmarshal(respuesta)
-        except Exception as e:
-            return {'resultados': []}
-    
-    def solicitar_descarga(self, archivo):
-        try:
-            mensaje = Marshalling.marshal('SOLICITUD_DESCARGA',
-                                         archivo=archivo,
-                                         token=self.auth_token)
-            
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-                sock.settimeout(self.timeout)
-                sock.connect((self.peer_ip, self.puerto_control))
-                sock.send(mensaje)
-                
-                respuesta = sock.recv(1024)
-                return Marshalling.unmarshal(respuesta)
-        except Exception as e:
-            return {'tipo': 'ERROR', 'mensaje': str(e)}
-
-# Skeletons (server)
-class PeerSkeleton:
-    def __init__(self, peer_instancia):
-        self.peer = peer_instancia
-        self.manejadores = {
-            'DISCOVERY': self._manejar_discovery,
-            'DISCOVERY_RESPONSE': self._manejar_discovery_response,
-            'HEARTBEAT': self._manejar_heartbeat,
-            'BUSCAR': self._manejar_busqueda,
-            'SOLICITUD_DESCARGA': self._manejar_solicitud_descarga,
-            'NUEVO_ARCHIVO': self._manejar_nuevo_archivo,
-            'NUEVO_PEER': self._manejar_nuevo_peer,
-            'SOLICITUD_PEERS': self._manejar_solicitud_peers,
-        }
-    
-    def procesar_solicitud_tcp(self, datos, addr):
-        mensaje = Marshalling.unmarshal(datos)
-        if not mensaje:
-            return Marshalling.marshal('ERROR', mensaje='Mensaje inválido')
-        
-        if mensaje.get('token') != self.peer.auth_token and mensaje['tipo'] != 'DISCOVERY':
-            return Marshalling.marshal('ERROR', mensaje='Autenticación fallida')
-        
-        tipo = mensaje['tipo']
-        if tipo in self.manejadores:
-            try:
-                resultado = self.manejadores[tipo](mensaje, addr)
-                if resultado:
-                    return Marshalling.marshal(resultado['tipo'], **resultado)
-            except Exception as e:
-                return Marshalling.marshal('ERROR', mensaje=str(e))
-        
-        return Marshalling.marshal('ERROR', mensaje='Tipo no soportado')
-    
-    def procesar_solicitud_udp(self, datos, addr):
-        mensaje = Marshalling.unmarshal(datos)
-        if not mensaje:
-            return None
-        
-        if mensaje.get('token') != self.peer.auth_token and mensaje['tipo'] not in ['DISCOVERY']:
-            return None
-        
-        tipo = mensaje['tipo']
-        if tipo in self.manejadores:
-            try:
-                resultado = self.manejadores[tipo](mensaje, addr)
-                if resultado:
-                    return Marshalling.marshal(resultado['tipo'], **resultado)
-            except:
-                pass
-        
-        return None
-    
-    def _manejar_discovery(self, mensaje, addr):
-        if addr[0] != self.peer.mi_ip:
-            self.peer.peers_conocidos[addr[0]] = time.time()
-            return {
-                'tipo': 'DISCOVERY_RESPONSE',
-                'token': self.peer.auth_token
-            }
-        return None
-    
-    def _manejar_discovery_response(self, mensaje, addr):
-        if addr[0] not in self.peer.peers_conocidos:
-            self.peer.peers_conocidos[addr[0]] = time.time()
-            print(f"\nNuevo peer descubierto: {addr[0]}")
-        return None
-    
-    def _manejar_heartbeat(self, mensaje, addr):
-        ip = mensaje.get('ip', addr[0])
-        self.peer.peers_conocidos[ip] = mensaje.get('timestamp', time.time())
-        return None
-    
-    def _manejar_busqueda(self, mensaje, addr):
-        query = mensaje['query'].lower()
-        resultados = []
-        
-        for nombre, info in self.peer.mis_archivos.items():
-            if query in nombre.lower():
-                resultados.append({
-                    'nombre': nombre,
-                    'tamaño': info['tamaño'],
-                    'peer_id': self.peer.mi_id,
-                    'peer_ip': self.peer.mi_ip
-                })
-        
-        return {
-            'tipo': 'RESULTADOS',
-            'resultados': resultados
-        }
-    
-    def _manejar_solicitud_descarga(self, mensaje, addr):
-        archivo = mensaje['archivo']
-        
-        if archivo in self.peer.mis_archivos:
-            ruta = self.peer.mis_archivos[archivo]['ruta']
-            md5_hash = hashlib.md5()
-            with open(ruta, "rb") as f:
-                for chunk in iter(lambda: f.read(4096), b""):
-                    md5_hash.update(chunk)
-            
-            return {
-                'tipo': 'DESCARGA_AUTORIZADA',
-                'archivo': archivo,
-                'tamaño': self.peer.mis_archivos[archivo]['tamaño'],
-                'md5': md5_hash.hexdigest()
-            }
-        else:
-            return {
-                'tipo': 'ERROR',
-                'mensaje': 'Archivo no encontrado'
-            }
-    
-    def _manejar_nuevo_archivo(self, mensaje, addr):
-        if addr[0] != self.peer.mi_ip:
-            peer_ip = mensaje['ip']
-            peer_id = mensaje['peer_id']
-            archivo = mensaje['archivo']
-            tamaño = mensaje['tamaño']
-            
-            print(f"\nNUEVO ARCHIVO EN LA RED:")
-            print(f"   Archivo: {archivo} ({tamaño/(1024*1024):.1f} MB)")
-            print(f"   Peer: {peer_id} ({peer_ip})")
-        
-        return None
-    
-    def _manejar_nuevo_peer(self, mensaje, addr):
-        nueva_ip = mensaje['ip']
-        if nueva_ip != self.peer.mi_ip and nueva_ip not in self.peer.peers_conocidos:
-            self.peer.peers_conocidos[nueva_ip] = time.time()
-            print(f"\nNuevo peer añadido (propagado): {nueva_ip}")
-        return None
-    
-    def _manejar_solicitud_peers(self, mensaje, addr):
-        return {
-            'tipo': 'LISTA_PEERS',
-            'peers': list(self.peer.peers_conocidos.keys()),
-            'token': self.peer.auth_token
-        }
+from skeleton import PeerSkeleton
+from stub import PeerStub
+from marshalling import Marshalling
 
 # P2P general
 class P2P_Peer:
     def __init__(self):
-        self.mi_ip = self.obtener_ip_local()
-        self.puerto_control = 5000
-        self.puerto_datos = 5001
-        self.puerto_discovery = 5003
-        self.puerto_heartbeat = 5004
-        self.puerto_anuncios = 5005
+        self.PASSWORD = "el_shrek"
+        self.RUTA_COMPARTIR = Path("compartir")
+        self.RUTA_DESCARGAS = Path("descargas")
 
-        self.password_red = "el_shrek" 
-        self.auth_token = hashlib.sha256(self.password_red.encode()).hexdigest()
-        self.llave_aes = hashlib.sha256(self.password_red.encode()).digest()
-        
+        # Obtener IP Local para descubrimiento de red
+        self.mi_ip = self.obtener_ip_local()
+
+        # Puertos reservados para operaciones
+        self.puerto_control = 5000      # Búsquedas y solicitudes de descarga
+        self.puerto_datos = 5001        # Transferencia de archivos
+        self.puerto_discovery = 5003    # Descubrimiento inicial
+        self.puerto_heartbeat = 5004    # Heartbeats y estado de peers
+        self.puerto_anuncios = 5005     # Anuncios de nuevos archivos
+
+        # Gneracion de claves
+        self.auth_token = hashlib.sha256(self.PASSWORD.encode()).hexdigest()
+        self.llave_aes = hashlib.sha256(self.PASSWORD.encode()).digest()
+        # identificador propio/unico en la red
         self.mi_id = hashlib.sha256(f"{self.mi_ip}:{self.puerto_control}".encode()).hexdigest()[:8]
-        self.peers_conocidos = {}
-        self.stubs = {}
         
-        self.ruta_compartir = Path("compartir")
-        self.ruta_descargas = Path("descargas")
-        self.mis_archivos = {}
-        self.corriendo = True
+        # Peers conocidos de la red completa, con estampas de tiempo de vida por peer
+        self.peers_conocidos = {}  # ip -> timestamp ultimo heartbeat
+        self.stubs = {}
         
         print(f"\nPEER INICIADO: {self.mi_id}")
         print(f"IP: {self.mi_ip}")
@@ -572,24 +46,37 @@ class P2P_Peer:
         print(f"Heartbeat: {self.puerto_heartbeat}")
         print(f"Anuncios: {self.puerto_anuncios}")
         
-        self.ruta_compartir.mkdir(exist_ok=True)
-        self.ruta_descargas.mkdir(exist_ok=True)
-        
+        # Crear rutas de archivos si no existen
+        self.RUTA_COMPARTIR.mkdir(exist_ok=True)
+        self.RUTA_DESCARGAS.mkdir(exist_ok=True)
+        # Inicializar archivos
+        self.mis_archivos = {}
+        # 
         self.skeleton = PeerSkeleton(self)
         
+        # MArcar nodo como iniciado
+        self.corriendo = True
         self.escanear_archivos()
         self.iniciar_servicios()
         
+        # Resultados para archivos en red
         self.results = []
     
     def obtener_ip_local(self):
+        '''
+        Obtencion de IP local del nodo en la red
+        '''
         try:
+            # Crear socket dummy para conocer la ip
             s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            # Conectar a cualquier direccion
             s.connect(("8.8.8.8", 80))
             ip = s.getsockname()[0]
+            # Cerrar socket dummy
             s.close()
             return ip
         except:
+            # De lo contrario asumir que se eata trabajando en la misma maquina
             return "127.0.0.1"
     
     def obtener_stub(self, peer_ip):
@@ -602,12 +89,17 @@ class P2P_Peer:
         return self.stubs[peer_ip]
     
     def iniciar_servicios(self):
+        '''
+        Iniciar servicios del nodo
+        '''
+        # Servidores principales
         threading.Thread(target=self.servidor_control, daemon=True).start()
         threading.Thread(target=self.servidor_datos, daemon=True).start()
         threading.Thread(target=self.servidor_discovery, daemon=True).start()
         threading.Thread(target=self.servidor_heartbeat, daemon=True).start()
         threading.Thread(target=self.servidor_anuncios, daemon=True).start()
         
+        # Hilos de mantenimiento
         threading.Thread(target=self.heartbeat_loop, daemon=True).start()
         threading.Thread(target=self.monitor_archivos, daemon=True).start()
         
@@ -663,6 +155,7 @@ class P2P_Peer:
         servidor.close()
     
     def servidor_heartbeat(self):
+        """Maneja heartbeats y propagación de peers (UDP)"""
         servidor = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         servidor.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         servidor.bind((self.mi_ip, self.puerto_heartbeat))
@@ -729,7 +222,7 @@ class P2P_Peer:
         archivos_anteriores = set(self.mis_archivos.keys())
         archivos_nuevos = {}
         
-        for archivo in self.ruta_compartir.glob("*"):
+        for archivo in self.RUTA_COMPARTIR.glob("*"):
             if archivo.is_file():
                 stats = archivo.stat()
                 archivos_nuevos[archivo.name] = {
@@ -771,6 +264,7 @@ class P2P_Peer:
                 del self.stubs[ip]
     
     def enviar_heartbeat(self):
+        """Envía heartbeat a todos los peers conocidos"""
         for ip in list(self.peers_conocidos.keys()):
             try:
                 mensaje = Marshalling.marshal('HEARTBEAT',
@@ -814,6 +308,7 @@ class P2P_Peer:
                 pass
     
     def descubrir_red(self):
+        """Busca peers en la red mediante broadcast"""
         print("\nBuscando peers en la red...")
         
         try:
@@ -845,6 +340,7 @@ class P2P_Peer:
                 except:
                     pass
             
+            # Pedir lista de peers a los encontrados
             for ip in peers_encontrados[:3]:
                 self.solicitar_lista_peers(ip)
             
@@ -952,7 +448,7 @@ class P2P_Peer:
                 "token": self.auth_token
             }).encode())
             
-            ruta = self.ruta_descargas / nombre_archivo
+            ruta = self.RUTA_DESCARGAS / nombre_archivo
             tamaño = respuesta["tamaño"]
             recibido = 0
             
@@ -1000,7 +496,7 @@ class P2P_Peer:
             print(f"Error en descarga: {e}")
     
     def enviar_archivo(self, cliente, archivo):
-        ruta = self.ruta_compartir / archivo
+        ruta = self.RUTA_COMPARTIR / archivo
         if not ruta.exists():
             return
         
