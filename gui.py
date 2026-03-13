@@ -4,7 +4,7 @@ from tkinter import messagebox, filedialog
 import threading
 import shutil
 import os
-import peer
+import peer_stub as peer
 
 # Configuración global del tema
 ctk.set_appearance_mode("dark")  # Modo oscuro por defecto
@@ -212,7 +212,7 @@ class BibliotecaGUI:
             """
             lista_compartidos.delete(0, tk.END)
             try:
-                archivos = os.listdir(self.nodo.ruta_compartir)
+                archivos = os.listdir(self.nodo.RUTA_COMPARTIR)
                 if archivos:
                     for arch in archivos:
                         lista_compartidos.insert(tk.END, f" {arch}")
@@ -230,7 +230,7 @@ class BibliotecaGUI:
             ruta_archivo = filedialog.askopenfilename(title="Selecciona archivo para compartir")
             if ruta_archivo:
                 try:
-                    destino = os.path.join(self.nodo.ruta_compartir, os.path.basename(ruta_archivo))
+                    destino = os.path.join(self.nodo.RUTA_COMPARTIR, os.path.basename(ruta_archivo))
                     shutil.copy2(ruta_archivo, destino)
                     self.nodo.escanear_archivos()
                     messagebox.showinfo("Compartir",
@@ -274,7 +274,7 @@ class BibliotecaGUI:
         lista_descargas.pack(fill="both", expand=True, padx=10, pady=10)
 
         try:
-            archivos = os.listdir(self.nodo.ruta_descargas)
+            archivos = os.listdir(self.nodo.RUTA_DESCARGAS)
             if archivos:
                 for arch in archivos:
                     lista_descargas.insert(tk.END, f" {arch}")
