@@ -13,9 +13,19 @@ from marshalling import Marshalling
 
 # P2P general
 class P2P_Peer:
+    """
+    Clase principal que representa un peer en la red P2P.
+    Maneja la comunicación con otros peers, el descubrimiento,
+    la compartición y descarga de archivos, y el mantenimiento
+    de la red.
+    """
+
     def __init__(self):
+        # Contraseña común para todos los peers (autenticación simple)
         self.PASSWORD = "el_shrek"
+        # Carpeta donde se colocan los archivos a compartir
         self.RUTA_COMPARTIR = Path("compartir")
+        # Carpeta donde se guardan las descargas
         self.RUTA_DESCARGAS = Path("descargas")
 
         # Obtener IP Local para descubrimiento de red
@@ -28,15 +38,15 @@ class P2P_Peer:
         self.puerto_heartbeat = 5004    # Heartbeats y estado de peers
         self.puerto_anuncios = 5005     # Anuncios de nuevos archivos
 
-        # Gneracion de claves
+        # Generacion de claves para autenticación y cifrado
         self.auth_token = hashlib.sha256(self.PASSWORD.encode()).hexdigest()
         self.llave_aes = hashlib.sha256(self.PASSWORD.encode()).digest()
-        # identificador propio/unico en la red
+        # Identificador propio/unico en la red (se genera a partir de IP y puerto)
         self.mi_id = hashlib.sha256(f"{self.mi_ip}:{self.puerto_control}".encode()).hexdigest()[:8]
         
         # Peers conocidos de la red completa, con estampas de tiempo de vida por peer
         self.peers_conocidos = {}  # ip -> timestamp ultimo heartbeat
-        self.stubs = {}
+        self.stubs = {}  # Caché de objetos stub para comunicación con cada peer
         
         print(f"\nPEER INICIADO: {self.mi_id}")
         print(f"IP: {self.mi_ip}")
@@ -49,38 +59,43 @@ class P2P_Peer:
         # Crear rutas de archivos si no existen
         self.RUTA_COMPARTIR.mkdir(exist_ok=True)
         self.RUTA_DESCARGAS.mkdir(exist_ok=True)
-        # Inicializar archivos
+        # Diccionario con los archivos que este peer comparte (nombre -> info)
         self.mis_archivos = {}
-        # 
+        # Objeto que procesa las solicitudes entrantes
         self.skeleton = PeerSkeleton(self)
         
-        # MArcar nodo como iniciado
+        # Marcar nodo como iniciado
         self.corriendo = True
-        self.escanear_archivos()
-        self.iniciar_servicios()
+        self.escanear_archivos()      # Escanea la carpeta compartir al inicio
+        self.iniciar_servicios()      # Lanza los hilos de los servidores
         
-        # Resultados para archivos en red
+        # Resultados para archivos en red (última búsqueda)
         self.results = []
     
     def obtener_ip_local(self):
-        '''
-        Obtencion de IP local del nodo en la red
-        '''
+        """
+        Obtiene la dirección IP local del equipo en la red.
+        Si no puede determinarla, asume 127.0.0.1 (localhost).
+        """
         try:
             # Crear socket dummy para conocer la ip
             s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            # Conectar a cualquier direccion
+            # Conectar a cualquier direccion (no envía datos realmente)
             s.connect(("8.8.8.8", 80))
-            ip = s.getsockname()[0]
-            # Cerrar socket dummy
+            ip = s.getsockname()[0]  # Obtener IP de la interfaz usada
             s.close()
             return ip
         except:
-            # De lo contrario asumir que se eata trabajando en la misma maquina
+            # Si falla (sin red), asumir localhost
             return "127.0.0.1"
     
     def obtener_stub(self, peer_ip):
+        """
+        Devuelve un objeto stub para comunicarse con un peer dado.
+        Si no existe, lo crea y lo guarda en caché.
+        """
         if peer_ip not in self.stubs:
+            # Crear stub con la IP, puerto de control y token de autenticación
             self.stubs[peer_ip] = PeerStub(
                 peer_ip,
                 self.puerto_control,
@@ -89,10 +104,11 @@ class P2P_Peer:
         return self.stubs[peer_ip]
     
     def iniciar_servicios(self):
-        '''
-        Iniciar servicios del nodo
-        '''
-        # Servidores principales
+        """
+        Inicia todos los hilos de servidores (TCP y UDP) que atienden
+        las distintas funciones del peer, así como los hilos de mantenimiento.
+        """
+        # Servidores principales (cada uno en su propio hilo)
         threading.Thread(target=self.servidor_control, daemon=True).start()
         threading.Thread(target=self.servidor_datos, daemon=True).start()
         threading.Thread(target=self.servidor_discovery, daemon=True).start()
@@ -103,26 +119,38 @@ class P2P_Peer:
         threading.Thread(target=self.heartbeat_loop, daemon=True).start()
         threading.Thread(target=self.monitor_archivos, daemon=True).start()
         
-        time.sleep(1)
-        self.descubrir_red()
+        time.sleep(1)  # Pequeña pausa para que los servidores arranquen
+        self.descubrir_red()  # Iniciar descubrimiento de peers
     
     def servidor_control(self):
+        """
+        Servidor TCP en el puerto de control.
+        Atiende solicitudes de búsqueda y peticiones de descarga.
+        Pasa los datos al skeleton para procesarlos.
+        """
         servidor = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        servidor.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        servidor.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)  # Reutilizar puerto
         servidor.bind((self.mi_ip, self.puerto_control))
-        servidor.listen(20)
-        servidor.settimeout(1)
+        servidor.listen(20)  # Máximo 20 conexiones en cola
+        servidor.settimeout(1)  # Timeout para poder salir del bucle al cerrar
         
         while self.corriendo:
             try:
-                cliente, addr = servidor.accept()
+                cliente, addr = servidor.accept()  # Aceptar nueva conexión
+                # Atender cada cliente en un hilo separado
                 threading.Thread(target=self.manejar_control_con_skeleton, 
                                args=(cliente, addr), daemon=True).start()
+            except socket.timeout:
+                continue  # Timeout, volver a comprobar bandera de corrido
             except:
                 continue
         servidor.close()
     
     def servidor_datos(self):
+        """
+        Servidor TCP en el puerto de datos.
+        Se encarga de enviar el archivo solicitado a otro peer.
+        """
         servidor = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         servidor.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         servidor.bind((self.mi_ip, self.puerto_datos))
@@ -133,29 +161,40 @@ class P2P_Peer:
             try:
                 cliente, addr = servidor.accept()
                 threading.Thread(target=self.manejar_datos, args=(cliente, addr), daemon=True).start()
+            except socket.timeout:
+                continue
             except:
                 continue
         servidor.close()
     
     def servidor_discovery(self):
+        """
+        Servidor UDP para descubrimiento de peers.
+        Responde a mensajes broadcast de discovery y solicitudes de lista de peers.
+        """
         servidor = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         servidor.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        servidor.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        servidor.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)  # Permitir broadcast
         servidor.bind((self.mi_ip, self.puerto_discovery))
         servidor.settimeout(1)
         
         while self.corriendo:
             try:
-                data, addr = servidor.recvfrom(1024)
+                data, addr = servidor.recvfrom(1024)  # Recibir datagrama
                 respuesta = self.skeleton.procesar_solicitud_udp(data, addr)
                 if respuesta:
-                    servidor.sendto(respuesta, addr)
+                    servidor.sendto(respuesta, addr)  # Enviar respuesta al mismo origen
+            except socket.timeout:
+                continue
             except:
                 continue
         servidor.close()
     
     def servidor_heartbeat(self):
-        """Maneja heartbeats y propagación de peers (UDP)"""
+        """
+        Servidor UDP para recibir heartbeats de otros peers.
+        También puede propagar información de peers.
+        """
         servidor = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         servidor.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         servidor.bind((self.mi_ip, self.puerto_heartbeat))
@@ -164,12 +203,18 @@ class P2P_Peer:
         while self.corriendo:
             try:
                 data, addr = servidor.recvfrom(1024)
-                self.skeleton.procesar_solicitud_udp(data, addr)
+                self.skeleton.procesar_solicitud_udp(data, addr)  # No necesita respuesta
+            except socket.timeout:
+                continue
             except:
                 continue
         servidor.close()
     
     def servidor_anuncios(self):
+        """
+        Servidor UDP para recibir anuncios de nuevos archivos compartidos
+        por otros peers (broadcast o unicast).
+        """
         servidor = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         servidor.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         servidor.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
@@ -180,38 +225,50 @@ class P2P_Peer:
             try:
                 data, addr = servidor.recvfrom(2048)
                 self.skeleton.procesar_solicitud_udp(data, addr)
+            except socket.timeout:
+                continue
             except:
                 continue
         servidor.close()
     
     def manejar_control_con_skeleton(self, cliente, addr):
+        """
+        Lee una solicitud TCP entrante (puerto control) y la pasa al skeleton
+        para que la procese. Envía la respuesta de vuelta.
+        """
         try:
-            data = cliente.recv(8192)
+            data = cliente.recv(8192)  # Recibir datos del cliente
             if not data:
                 return
             
             respuesta = self.skeleton.procesar_solicitud_tcp(data, addr)
             if respuesta:
-                cliente.send(respuesta)
+                cliente.send(respuesta)  # Enviar respuesta
         except Exception as e:
             print(f"Error en control: {e}")
         finally:
-            cliente.close()
+            cliente.close()  # Cerrar conexión
     
     def manejar_datos(self, cliente, addr):
+        """
+        Maneja una conexión entrante en el puerto de datos.
+        Recibe la solicitud de descarga (con posible offset) y envía el archivo
+        cifrado al solicitante.
+        """
         try:
             data = cliente.recv(1024)
             if not data:
                 return
-            mensaje = Marshalling.unmarshal(data)
+            mensaje = Marshalling.unmarshal(data)  # Deserializar
             if not mensaje:
                 return
+            # Verificar autenticación
             if mensaje.get("token") != self.auth_token:
                 print(f"\nIntento de descarga bloqueado desde {addr[0]}")
                 return
             if mensaje["tipo"] == "DESCARGA":
                 archivo = mensaje["archivo"]
-                offset = mensaje.get("offset", 0)
+                offset = mensaje.get("offset", 0)  # Byte desde el que reanudar
                 self.enviar_archivo(cliente, archivo, offset)
         except Exception as e:
             print(f"Error en datos: {e}")
@@ -219,9 +276,14 @@ class P2P_Peer:
             cliente.close()
     
     def escanear_archivos(self):
+        """
+        Escanea la carpeta 'compartir' y actualiza la lista de archivos locales.
+        Si detecta archivos nuevos, los anuncia a la red.
+        """
         archivos_anteriores = set(self.mis_archivos.keys())
         archivos_nuevos = {}
         
+        # Recorrer todos los archivos en la carpeta compartir
         for archivo in self.RUTA_COMPARTIR.glob("*"):
             if archivo.is_file():
                 stats = archivo.stat()
@@ -230,6 +292,7 @@ class P2P_Peer:
                     "ruta": str(archivo)
                 }
         
+        # Detectar cuáles son nuevos (no estaban antes)
         nuevos = set(archivos_nuevos.keys()) - archivos_anteriores
         self.mis_archivos = archivos_nuevos
         
@@ -237,34 +300,49 @@ class P2P_Peer:
             print(f"\nNuevos archivos compartidos localmente:")
             for archivo in nuevos:
                 print(f"   - {archivo}")
-                self.anunciar_archivo_nuevo(archivo)
+                self.anunciar_archivo_nuevo(archivo)  # Anunciar a la red
     
     def monitor_archivos(self):
+        """
+        Hilo que cada 5 segundos vuelve a escanear la carpeta compartir
+        para detectar cambios (archivos nuevos).
+        """
         while self.corriendo:
             time.sleep(5)
             self.escanear_archivos()
     
     def heartbeat_loop(self):
+        """
+        Hilo que cada 10 segundos envía heartbeats a todos los peers conocidos
+        y luego limpia los peers inactivos.
+        """
         while self.corriendo:
             time.sleep(10)
             self.enviar_heartbeat()
             self.limpiar_peers_inactivos()
     
     def limpiar_peers_inactivos(self):
+        """
+        Elimina de la lista de peers conocidos aquellos que no han enviado
+        heartbeat en más de 30 segundos.
+        """
         ahora = time.time()
         inactivos = []
         
         for ip, ultimo in list(self.peers_conocidos.items()):
-            if ahora - ultimo > 30:
+            if ahora - ultimo > 30:  # Si no hay heartbeat en los últimos 30s
                 inactivos.append(ip)
         
         for ip in inactivos:
             del self.peers_conocidos[ip]
             if ip in self.stubs:
-                del self.stubs[ip]
+                del self.stubs[ip]  # Limpiar también el stub
     
     def enviar_heartbeat(self):
-        """Envía heartbeat a todos los peers conocidos"""
+        """
+        Envía un mensaje UDP de heartbeat a cada peer conocido para indicar
+        que este peer sigue activo.
+        """
         for ip in list(self.peers_conocidos.keys()):
             try:
                 mensaje = Marshalling.marshal('HEARTBEAT',
@@ -277,9 +355,13 @@ class P2P_Peer:
                 sock.sendto(mensaje, (ip, self.puerto_heartbeat))
                 sock.close()
             except:
-                pass
+                pass  # Si falla, ignorar (el peer se limpiará después)
     
     def anunciar_archivo_nuevo(self, nombre_archivo):
+        """
+        Anuncia a la red (broadcast y a peers conocidos) que este peer
+        está compartiendo un archivo nuevo.
+        """
         if nombre_archivo not in self.mis_archivos:
             return
         
@@ -291,6 +373,7 @@ class P2P_Peer:
                                      tamaño=info["tamaño"],
                                      token=self.auth_token)
         
+        # Broadcast a toda la red local
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
@@ -299,6 +382,7 @@ class P2P_Peer:
         except:
             pass
         
+        # También enviar directamente a cada peer conocido
         for ip in list(self.peers_conocidos.keys()):
             try:
                 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -308,13 +392,17 @@ class P2P_Peer:
                 pass
     
     def descubrir_red(self):
-        """Busca peers en la red mediante broadcast"""
+        """
+        Busca otros peers en la red mediante un mensaje broadcast.
+        Recoge las respuestas y luego pide a los peers encontrados
+        su lista de peers para ampliar el conocimiento de la red.
+        """
         print("\nBuscando peers en la red...")
         
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-            sock.settimeout(3)
+            sock.settimeout(3)  # Esperar respuestas durante 3 segundos
             
             mensaje = Marshalling.marshal('DISCOVERY',
                                          ip=self.mi_ip,
@@ -329,6 +417,7 @@ class P2P_Peer:
                     data, addr = sock.recvfrom(1024)
                     respuesta = Marshalling.unmarshal(data)
                     
+                    # Verificar que la respuesta sea válida y no de uno mismo
                     if respuesta and respuesta.get("token") == self.auth_token and \
                        respuesta["tipo"] == "DISCOVERY_RESPONSE" and \
                        addr[0] != self.mi_ip:
@@ -337,10 +426,12 @@ class P2P_Peer:
                             peers_encontrados.append(addr[0])
                             print(f"Peer encontrado: {addr[0]}")
                             self.peers_conocidos[addr[0]] = time.time()
+                except socket.timeout:
+                    continue
                 except:
                     pass
             
-            # Pedir lista de peers a los encontrados
+            # Pedir lista de peers a los encontrados (hasta 3 para no saturar)
             for ip in peers_encontrados[:3]:
                 self.solicitar_lista_peers(ip)
             
@@ -356,6 +447,10 @@ class P2P_Peer:
             sock.close()
     
     def solicitar_lista_peers(self, peer_ip):
+        """
+        Pide a un peer específico su lista de peers conocidos para
+        ampliar nuestro conocimiento de la red.
+        """
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             sock.settimeout(2)
@@ -379,23 +474,29 @@ class P2P_Peer:
             
             sock.close()
         except:
-            pass
+            pass  # Si falla, simplemente no se añaden peers
     
     def buscar(self, query):
+        """
+        Realiza una búsqueda de archivos en la red consultando
+        a los peers conocidos (hasta 10). Muestra los resultados.
+        """
         print(f"\nBuscando '{query}'...")
         
         resultados = []
         peers_consultados = 0
         
+        # Consultar hasta los primeros 10 peers conocidos
         for ip in list(self.peers_conocidos.keys())[:10]:
             try:
                 stub = self.obtener_stub(ip)
-                respuesta = stub.buscar(query)
+                respuesta = stub.buscar(query)  # Llamada remota
                 
                 if respuesta and respuesta.get("resultados"):
                     resultados.extend(respuesta["resultados"])
                     peers_consultados += 1
-            except:
+            except Exception:
+                # Si hay error, eliminar peer de la lista
                 if ip in self.peers_conocidos:
                     del self.peers_conocidos[ip]
                 if ip in self.stubs:
@@ -405,7 +506,7 @@ class P2P_Peer:
         
         if resultados:
             print(f"Encontrados {len(resultados)} resultados:")
-            self.results = []
+            self.results = []  # Guardar nombres para facilitar descarga
             for i, res in enumerate(resultados, 1):
                 self.results.append(res['nombre'])
                 tamaño_mb = res["tamaño"] / (1024*1024)
@@ -417,10 +518,16 @@ class P2P_Peer:
         return resultados
     
     def descargar(self, nombre_archivo, peer_ip, callback_progress=None):
+        """
+        Inicia la descarga de un archivo desde un peer específico.
+        Soporta reanudación (si el archivo ya existe parcialmente).
+        Verifica integridad con MD5.
+        """
         if peer_ip not in self.peers_conocidos:
             print("Peer no conocido")
             return
         
+        # Si el nombre no coincide exactamente, buscar en resultados previos
         for archive in self.results:
             if nombre_archivo in archive:
                 nombre_archivo = archive
@@ -430,6 +537,7 @@ class P2P_Peer:
         
         try:
             stub = self.obtener_stub(peer_ip)
+            # Primero, solicitar autorización y metadatos
             respuesta = stub.solicitar_descarga(nombre_archivo)
             
             if not respuesta or respuesta.get('tipo') != 'DESCARGA_AUTORIZADA':
@@ -444,6 +552,7 @@ class P2P_Peer:
             if ruta.exists():
                 tamaño_actual = ruta.stat().st_size
                 if tamaño_actual < tamaño:
+                    # Preguntar si desea reanudar
                     op = input(f"El archivo {nombre_archivo} ya existe pero está incompleto ({tamaño_actual}/{tamaño} bytes). ¿Reanudar? (s/n): ").strip().lower()
                     if op == 's':
                         offset = tamaño_actual
@@ -461,6 +570,7 @@ class P2P_Peer:
             if offset > 0:
                 print(f"Reanudando desde el byte {offset} ({offset/(1024*1024):.1f} MB)")
 
+            # Conectar al puerto de datos del peer
             sock_datos = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock_datos.settimeout(10)
             sock_datos.connect((peer_ip, self.puerto_datos))
@@ -472,34 +582,34 @@ class P2P_Peer:
                                                offset=offset)
             sock_datos.send(msg_descarga)
             
+            # Recibir nonce para descifrado AES-CTR
             nonce = sock_datos.recv(16)
             cipher = Cipher(algorithms.AES(self.llave_aes), modes.CTR(nonce))
             decryptor = cipher.decryptor()
 
             # Preparar archivo para escritura
             try:
-                # Si offset > 0, continuar descarga
                 if offset > 0:
+                    # Abrir en modo lectura/escritura binaria y posicionarse al final
                     f = open(ruta, 'r+b')
                     f.seek(offset)
-                # de lo contrario empezar de cero
                 else:
                     f = open(ruta, 'wb')
             except FileNotFoundError:
-                # Si offset > 0 pero el archivo no existe, empezar de cero
+                # Si no existe, crear nuevo (por si acaso)
                 f = open(ruta, 'wb')
                 offset = 0
 
             md5_descarga = hashlib.md5()
             if offset > 0:
-                # Leer el archivo existente para actualizar MD5 hasta offset
+                # Actualizar MD5 con la parte ya descargada
                 with open(ruta, 'rb') as tmp:
                     md5_descarga.update(tmp.read(offset))
 
             recibido = offset
             try:
                 while recibido < tamaño:
-                    chunk = sock_datos.recv(65536)
+                    chunk = sock_datos.recv(65536)  # Recibir fragmento
                     if not chunk:
                         break
                     chunk_desencriptado = decryptor.update(chunk)
@@ -507,6 +617,7 @@ class P2P_Peer:
                     md5_descarga.update(chunk_desencriptado)
                     recibido += len(chunk)
                     
+                    # Mostrar progreso cada aproximadamente 1 MB
                     if recibido % (1024*1024) < 65536:
                         porcentaje = (recibido / tamaño) * 100
                         print(f"   Progreso: {porcentaje:.1f}% ({recibido/(1024*1024):.1f} MB)")
@@ -533,6 +644,10 @@ class P2P_Peer:
             print(f"Error en descarga: {e}")
     
     def enviar_archivo(self, cliente, archivo, offset=0):
+        """
+        Envía un archivo solicitado a través de la conexión de datos.
+        Aplica cifrado AES-CTR y soporta envío parcial (offset).
+        """
         ruta = self.RUTA_COMPARTIR / archivo
         if not ruta.exists():
             return
@@ -543,6 +658,7 @@ class P2P_Peer:
             # Nada que enviar
             return
         
+        # Generar nonce aleatorio para este envío
         nonce = os.urandom(16)
         cliente.send(nonce)
         cipher = Cipher(algorithms.AES(self.llave_aes), modes.CTR(nonce))
@@ -550,15 +666,19 @@ class P2P_Peer:
         
         with open(ruta, 'rb') as f:
             if offset > 0:
-                f.seek(offset)
+                f.seek(offset)  # Posicionarse en el byte indicado
             while True:
                 chunk = f.read(65536)
                 if not chunk:
                     break
-                encrypted_chunk = encryptor.update(chunk)
+                encrypted_chunk = encryptor.update(chunk)  # Cifrar
                 cliente.send(encrypted_chunk)
     
     def menu(self):
+        """
+        Menú interactivo para el usuario. Permite buscar, ver archivos,
+        ver peers, descargar y salir.
+        """
         while self.corriendo:
             print(f"\nPEER: {self.mi_id} - {len(self.peers_conocidos)} peers")
             print("1. Buscar archivos")
