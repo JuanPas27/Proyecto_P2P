@@ -4,565 +4,54 @@ import json
 import os
 import time
 import hashlib
+import queue
+import random
 from pathlib import Path
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-import struct
 
-# Marshalling/Unmarshalling
-class Marshalling:
-    """Realiza la serialización/deserialización de los mensajes"""
-    
-    TIPOS_MENSAJE = {
-        'DISCOVERY': 0x01,
-        'DISCOVERY_RESPONSE': 0x02,
-        'HEARTBEAT': 0x03,
-        'BUSCAR': 0x04,
-        'RESULTADOS': 0x05,
-        'SOLICITUD_DESCARGA': 0x06,
-        'DESCARGA_AUTORIZADA': 0x07,
-        'DESCARGA': 0x08,
-        'NUEVO_ARCHIVO': 0x09,
-        'NUEVO_PEER': 0x0A,
-        'SOLICITUD_PEERS': 0x0B,
-        'LISTA_PEERS': 0x0C,
-        'ERROR': 0xFF
-    }
-    
-    CODIGOS_TIPO = {v: k for k, v in TIPOS_MENSAJE.items()}
-    
-    @staticmethod
-    def marshal(tipo, **kwargs):
-        """Convierte mensaje a bytes según su tipo"""
-        codigo = Marshalling.TIPOS_MENSAJE.get(tipo, 0xFF)
-        
-        # DISCOVERY: ip + token
-        if tipo == 'DISCOVERY':
-            ip_bytes = kwargs['ip'].encode()
-            token_bytes = kwargs['token'].encode()
-            formato = f'!B B {len(ip_bytes)}s {len(token_bytes)}s'
-            return struct.pack(formato, codigo, len(ip_bytes), ip_bytes, token_bytes)
-        
-        # DISCOVERY_RESPONSE: solo token
-        elif tipo == 'DISCOVERY_RESPONSE':
-            token_bytes = kwargs['token'].encode()
-            formato = f'!B {len(token_bytes)}s'
-            return struct.pack(formato, codigo, token_bytes)
-        
-        # HEARTBEAT: ip + timestamp + token
-        elif tipo == 'HEARTBEAT':
-            ip_bytes = kwargs['ip'].encode()
-            token_bytes = kwargs['token'].encode()
-            formato = f'!B Q B {len(ip_bytes)}s {len(token_bytes)}s'
-            return struct.pack(formato, codigo, kwargs['timestamp'], 
-                             len(ip_bytes), ip_bytes, token_bytes)
-        
-        # BUSCAR: query + token
-        elif tipo == 'BUSCAR':
-            query_bytes = kwargs['query'].encode()
-            token_bytes = kwargs['token'].encode()
-            formato = f'!B B {len(query_bytes)}s {len(token_bytes)}s'
-            return struct.pack(formato, codigo, len(query_bytes), query_bytes, token_bytes)
-        
-        # RESULTADOS: lista de resultados
-        elif tipo == 'RESULTADOS':
-            resultados = kwargs['resultados']
-            # código y número de resultados
-            data = struct.pack('!B I', codigo, len(resultados))
-            
-            for r in resultados:
-                nombre_bytes = r['nombre'].encode()
-                peer_id_bytes = r['peer_id'].encode()
-                peer_ip_bytes = r['peer_ip'].encode()
-                
-                data += struct.pack(f'!I Q B {len(nombre_bytes)}s B {len(peer_id_bytes)}s B {len(peer_ip_bytes)}s',
-                                  r['tamaño'],
-                                  len(nombre_bytes), nombre_bytes,
-                                  len(peer_id_bytes), peer_id_bytes,
-                                  len(peer_ip_bytes), peer_ip_bytes)
-            return data
-        
-        # SOLICITUD_DESCARGA: archivo + token
-        elif tipo == 'SOLICITUD_DESCARGA':
-            archivo_bytes = kwargs['archivo'].encode()
-            token_bytes = kwargs['token'].encode()
-            formato = f'!B B {len(archivo_bytes)}s {len(token_bytes)}s'
-            return struct.pack(formato, codigo, len(archivo_bytes), archivo_bytes, token_bytes)
-        
-        # DESCARGA_AUTORIZADA: archivo + tamaño + md5 + token
-        elif tipo == 'DESCARGA_AUTORIZADA':
-            archivo_bytes = kwargs['archivo'].encode()
-            md5_bytes = kwargs['md5'].encode()
-            token_bytes = kwargs['token'].encode()
-            formato = f'!B B {len(archivo_bytes)}s Q 32s {len(token_bytes)}s'
-            return struct.pack(formato, codigo, len(archivo_bytes), archivo_bytes,
-                             kwargs['tamaño'], md5_bytes, token_bytes)
-        
-        # DESCARGA: archivo + token
-        elif tipo == 'DESCARGA':
-            archivo_bytes = kwargs['archivo'].encode()
-            token_bytes = kwargs['token'].encode()
-            formato = f'!B B {len(archivo_bytes)}s {len(token_bytes)}s'
-            return struct.pack(formato, codigo, len(archivo_bytes), archivo_bytes, token_bytes)
-        
-        # NUEVO_ARCHIVO: ip + peer_id + archivo + tamaño + token
-        elif tipo == 'NUEVO_ARCHIVO':
-            ip_bytes = kwargs['ip'].encode()
-            peer_id_bytes = kwargs['peer_id'].encode()
-            archivo_bytes = kwargs['archivo'].encode()
-            token_bytes = kwargs['token'].encode()
-            
-            formato = f'!B B {len(ip_bytes)}s B {len(peer_id_bytes)}s B {len(archivo_bytes)}s Q {len(token_bytes)}s'
-            return struct.pack(formato, codigo,
-                             len(ip_bytes), ip_bytes,
-                             len(peer_id_bytes), peer_id_bytes,
-                             len(archivo_bytes), archivo_bytes,
-                             kwargs['tamaño'], token_bytes)
-        
-        # NUEVO_PEER: ip + token
-        elif tipo == 'NUEVO_PEER':
-            ip_bytes = kwargs['ip'].encode()
-            token_bytes = kwargs['token'].encode()
-            formato = f'!B B {len(ip_bytes)}s {len(token_bytes)}s'
-            return struct.pack(formato, codigo, len(ip_bytes), ip_bytes, token_bytes)
-        
-        # SOLICITUD_PEERS: token
-        elif tipo == 'SOLICITUD_PEERS':
-            token_bytes = kwargs['token'].encode()
-            formato = f'!B {len(token_bytes)}s'
-            return struct.pack(formato, codigo, token_bytes)
-        
-        # LISTA_PEERS: lista de ips + token
-        elif tipo == 'LISTA_PEERS':
-            peers = kwargs['peers']
-            token_bytes = kwargs['token'].encode()
-            
-            data = struct.pack('!B I', codigo, len(peers))
-            for ip in peers:
-                ip_bytes = ip.encode()
-                data += struct.pack(f'!B {len(ip_bytes)}s', len(ip_bytes), ip_bytes)
-            data += struct.pack(f'!{len(token_bytes)}s', token_bytes)
-            return data
-        
-        # ERROR: mensaje + token
-        elif tipo == 'ERROR':
-            msg_bytes = kwargs['mensaje'].encode()
-            token_bytes = kwargs.get('token', '').encode()
-            formato = f'!B B {len(msg_bytes)}s {len(token_bytes)}s'
-            return struct.pack(formato, codigo, len(msg_bytes), msg_bytes, token_bytes)
-        
-        else:
-            # Fallback a JSON para tipos no implementados
-            return json.dumps({'tipo': codigo, **kwargs}).encode()
-    
-    @staticmethod
-    def unmarshal(data):
-        """Reconstruir mensaje desde bytes"""
-        if not data:
-            return None
-        
-        try:
-            # código del mensaje (primer byte)
-            codigo = data[0]
-            
-            if codigo not in Marshalling.CODIGOS_TIPO:
-                # código desconocido con JSON
-                return json.loads(data.decode())
-            
-            tipo = Marshalling.CODIGOS_TIPO[codigo]
-            offset = 1 # evitar primer byte
-            
-            # DISCOVERY
-            if tipo == 'DISCOVERY':
-                ip_len = struct.unpack('!B', data[offset:offset+1])[0]
-                offset += 1
-                ip = data[offset:offset+ip_len].decode()
-                offset += ip_len
-                token = data[offset:].decode()
-                return {'tipo': tipo, 'ip': ip, 'token': token}
-            
-            # DISCOVERY_RESPONSE
-            elif tipo == 'DISCOVERY_RESPONSE':
-                token = data[offset:].decode()
-                return {'tipo': tipo, 'token': token}
-            
-            # HEARTBEAT
-            elif tipo == 'HEARTBEAT':
-                timestamp = struct.unpack('!Q', data[offset:offset+8])[0]
-                offset += 8
-                ip_len = struct.unpack('!B', data[offset:offset+1])[0]
-                offset += 1
-                ip = data[offset:offset+ip_len].decode()
-                offset += ip_len
-                token = data[offset:].decode()
-                return {'tipo': tipo, 'ip': ip, 'timestamp': timestamp, 'token': token}
-            
-            # BUSCAR
-            elif tipo == 'BUSCAR':
-                query_len = struct.unpack('!B', data[offset:offset+1])[0]
-                offset += 1
-                query = data[offset:offset+query_len].decode()
-                offset += query_len
-                token = data[offset:].decode()
-                return {'tipo': tipo, 'query': query, 'token': token}
-            
-            # RESULTADOS
-            elif tipo == 'RESULTADOS':
-                num_resultados = struct.unpack('!I', data[offset:offset+4])[0]
-                offset += 4
-                resultados = []
-                
-                for _ in range(num_resultados):
-                    tamaño = struct.unpack('!I', data[offset:offset+4])[0]
-                    offset += 4
-                    
-                    nombre_len = struct.unpack('!Q', data[offset:offset+8])[0]
-                    offset += 8
-                    nombre = data[offset:offset+nombre_len].decode()
-                    offset += nombre_len
-                    
-                    peer_id_len = struct.unpack('!B', data[offset:offset+1])[0]
-                    offset += 1
-                    peer_id = data[offset:offset+peer_id_len].decode()
-                    offset += peer_id_len
-                    
-                    peer_ip_len = struct.unpack('!B', data[offset:offset+1])[0]
-                    offset += 1
-                    peer_ip = data[offset:offset+peer_ip_len].decode()
-                    offset += peer_ip_len
-                    
-                    resultados.append({
-                        'nombre': nombre,
-                        'tamaño': tamaño,
-                        'peer_id': peer_id,
-                        'peer_ip': peer_ip
-                    })
-                
-                return {'tipo': tipo, 'resultados': resultados}
-            
-            # SOLICITUD_DESCARGA
-            elif tipo == 'SOLICITUD_DESCARGA':
-                archivo_len = struct.unpack('!B', data[offset:offset+1])[0]
-                offset += 1
-                archivo = data[offset:offset+archivo_len].decode()
-                offset += archivo_len
-                token = data[offset:].decode()
-                return {'tipo': tipo, 'archivo': archivo, 'token': token}
-            
-            # DESCARGA_AUTORIZADA
-            elif tipo == 'DESCARGA_AUTORIZADA':
-                archivo_len = struct.unpack('!B', data[offset:offset+1])[0]
-                offset += 1
-                archivo = data[offset:offset+archivo_len].decode()
-                offset += archivo_len
-                
-                tamaño = struct.unpack('!Q', data[offset:offset+8])[0]
-                offset += 8
-                
-                md5 = data[offset:offset+32].decode().strip('\x00')
-                offset += 32
-                
-                token = data[offset:].decode()
-                
-                return {
-                    'tipo': tipo,
-                    'archivo': archivo,
-                    'tamaño': tamaño,
-                    'md5': md5,
-                    'token': token
-                }
-            
-            # DESCARGA
-            elif tipo == 'DESCARGA':
-                archivo_len = struct.unpack('!B', data[offset:offset+1])[0]
-                offset += 1
-                archivo = data[offset:offset+archivo_len].decode()
-                offset += archivo_len
-                token = data[offset:].decode()
-                return {'tipo': tipo, 'archivo': archivo, 'token': token}
-            
-            # NUEVO_ARCHIVO
-            elif tipo == 'NUEVO_ARCHIVO':
-                ip_len = struct.unpack('!B', data[offset:offset+1])[0]
-                offset += 1
-                ip = data[offset:offset+ip_len].decode()
-                offset += ip_len
-                
-                peer_id_len = struct.unpack('!B', data[offset:offset+1])[0]
-                offset += 1
-                peer_id = data[offset:offset+peer_id_len].decode()
-                offset += peer_id_len
-                
-                archivo_len = struct.unpack('!B', data[offset:offset+1])[0]
-                offset += 1
-                archivo = data[offset:offset+archivo_len].decode()
-                offset += archivo_len
-                
-                tamaño = struct.unpack('!Q', data[offset:offset+8])[0]
-                offset += 8
-                
-                token = data[offset:].decode()
-                
-                return {
-                    'tipo': tipo,
-                    'ip': ip,
-                    'peer_id': peer_id,
-                    'archivo': archivo,
-                    'tamaño': tamaño,
-                    'token': token
-                }
-            
-            # NUEVO_PEER
-            elif tipo == 'NUEVO_PEER':
-                ip_len = struct.unpack('!B', data[offset:offset+1])[0]
-                offset += 1
-                ip = data[offset:offset+ip_len].decode()
-                offset += ip_len
-                token = data[offset:].decode()
-                return {'tipo': tipo, 'ip': ip, 'token': token}
-            
-            # SOLICITUD_PEERS
-            elif tipo == 'SOLICITUD_PEERS':
-                token = data[offset:].decode()
-                return {'tipo': tipo, 'token': token}
-            
-            # LISTA_PEERS
-            elif tipo == 'LISTA_PEERS':
-                num_peers = struct.unpack('!I', data[offset:offset+4])[0]
-                offset += 4
-                
-                peers = []
-                for _ in range(num_peers):
-                    ip_len = struct.unpack('!B', data[offset:offset+1])[0]
-                    offset += 1
-                    ip = data[offset:offset+ip_len].decode()
-                    offset += ip_len
-                    peers.append(ip)
-                
-                token = data[offset:].decode()
-                
-                return {'tipo': tipo, 'peers': peers, 'token': token}
-            
-            # ERROR
-            elif tipo == 'ERROR':
-                msg_len = struct.unpack('!B', data[offset:offset+1])[0]
-                offset += 1
-                mensaje = data[offset:offset+msg_len].decode()
-                offset += msg_len
-                token = data[offset:].decode() if offset < len(data) else ''
-                return {'tipo': tipo, 'mensaje': mensaje, 'token': token}
-            
-        except Exception as e:
-            print(f"Error en unmarshal: {e}")
-            # Fallback a JSON
-            try:
-                return json.loads(data.decode())
-            except:
-                return None
-        
-        return None
-
-# Stubs (clente)
-class PeerStub:
-    def __init__(self, peer_ip, puerto_control, auth_token):
-        self.peer_ip = peer_ip
-        self.puerto_control = puerto_control
-        self.auth_token = auth_token
-        self.timeout = 5
-    
-    def buscar(self, query):
-        try:
-            mensaje = Marshalling.marshal('BUSCAR', 
-                                         query=query,
-                                         token=self.auth_token)
-            
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-                sock.settimeout(self.timeout)
-                sock.connect((self.peer_ip, self.puerto_control))
-                sock.send(mensaje)
-                
-                respuesta = sock.recv(8192)
-                return Marshalling.unmarshal(respuesta)
-        except Exception as e:
-            return {'resultados': []}
-    
-    def solicitar_descarga(self, archivo):
-        try:
-            mensaje = Marshalling.marshal('SOLICITUD_DESCARGA',
-                                         archivo=archivo,
-                                         token=self.auth_token)
-            
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-                sock.settimeout(self.timeout)
-                sock.connect((self.peer_ip, self.puerto_control))
-                sock.send(mensaje)
-                
-                respuesta = sock.recv(1024)
-                return Marshalling.unmarshal(respuesta)
-        except Exception as e:
-            return {'tipo': 'ERROR', 'mensaje': str(e)}
-
-# Skeletons (server)
-class PeerSkeleton:
-    def __init__(self, peer_instancia):
-        self.peer = peer_instancia
-        self.manejadores = {
-            'DISCOVERY': self._manejar_discovery,
-            'DISCOVERY_RESPONSE': self._manejar_discovery_response,
-            'HEARTBEAT': self._manejar_heartbeat,
-            'BUSCAR': self._manejar_busqueda,
-            'SOLICITUD_DESCARGA': self._manejar_solicitud_descarga,
-            'NUEVO_ARCHIVO': self._manejar_nuevo_archivo,
-            'NUEVO_PEER': self._manejar_nuevo_peer,
-            'SOLICITUD_PEERS': self._manejar_solicitud_peers,
-        }
-    
-    def procesar_solicitud_tcp(self, datos, addr):
-        mensaje = Marshalling.unmarshal(datos)
-        if not mensaje:
-            return Marshalling.marshal('ERROR', mensaje='Mensaje inválido')
-        
-        if mensaje.get('token') != self.peer.auth_token and mensaje['tipo'] != 'DISCOVERY':
-            return Marshalling.marshal('ERROR', mensaje='Autenticación fallida')
-        
-        tipo = mensaje['tipo']
-        if tipo in self.manejadores:
-            try:
-                resultado = self.manejadores[tipo](mensaje, addr)
-                if resultado:
-                    return Marshalling.marshal(resultado['tipo'], **resultado)
-            except Exception as e:
-                return Marshalling.marshal('ERROR', mensaje=str(e))
-        
-        return Marshalling.marshal('ERROR', mensaje='Tipo no soportado')
-    
-    def procesar_solicitud_udp(self, datos, addr):
-        mensaje = Marshalling.unmarshal(datos)
-        if not mensaje:
-            return None
-        
-        if mensaje.get('token') != self.peer.auth_token and mensaje['tipo'] not in ['DISCOVERY']:
-            return None
-        
-        tipo = mensaje['tipo']
-        if tipo in self.manejadores:
-            try:
-                resultado = self.manejadores[tipo](mensaje, addr)
-                if resultado:
-                    return Marshalling.marshal(resultado['tipo'], **resultado)
-            except:
-                pass
-        
-        return None
-    
-    def _manejar_discovery(self, mensaje, addr):
-        if addr[0] != self.peer.mi_ip:
-            self.peer.peers_conocidos[addr[0]] = time.time()
-            return {
-                'tipo': 'DISCOVERY_RESPONSE',
-                'token': self.peer.auth_token
-            }
-        return None
-    
-    def _manejar_discovery_response(self, mensaje, addr):
-        if addr[0] not in self.peer.peers_conocidos:
-            self.peer.peers_conocidos[addr[0]] = time.time()
-            print(f"\nNuevo peer descubierto: {addr[0]}")
-        return None
-    
-    def _manejar_heartbeat(self, mensaje, addr):
-        ip = mensaje.get('ip', addr[0])
-        self.peer.peers_conocidos[ip] = mensaje.get('timestamp', time.time())
-        return None
-    
-    def _manejar_busqueda(self, mensaje, addr):
-        query = mensaje['query'].lower()
-        resultados = []
-        
-        for nombre, info in self.peer.mis_archivos.items():
-            if query in nombre.lower():
-                resultados.append({
-                    'nombre': nombre,
-                    'tamaño': info['tamaño'],
-                    'peer_id': self.peer.mi_id,
-                    'peer_ip': self.peer.mi_ip
-                })
-        
-        return {
-            'tipo': 'RESULTADOS',
-            'resultados': resultados
-        }
-    
-    def _manejar_solicitud_descarga(self, mensaje, addr):
-        archivo = mensaje['archivo']
-        
-        if archivo in self.peer.mis_archivos:
-            ruta = self.peer.mis_archivos[archivo]['ruta']
-            md5_hash = hashlib.md5()
-            with open(ruta, "rb") as f:
-                for chunk in iter(lambda: f.read(4096), b""):
-                    md5_hash.update(chunk)
-            
-            return {
-                'tipo': 'DESCARGA_AUTORIZADA',
-                'archivo': archivo,
-                'tamaño': self.peer.mis_archivos[archivo]['tamaño'],
-                'md5': md5_hash.hexdigest()
-            }
-        else:
-            return {
-                'tipo': 'ERROR',
-                'mensaje': 'Archivo no encontrado'
-            }
-    
-    def _manejar_nuevo_archivo(self, mensaje, addr):
-        if addr[0] != self.peer.mi_ip:
-            peer_ip = mensaje['ip']
-            peer_id = mensaje['peer_id']
-            archivo = mensaje['archivo']
-            tamaño = mensaje['tamaño']
-            
-            print(f"\nNUEVO ARCHIVO EN LA RED:")
-            print(f"   Archivo: {archivo} ({tamaño/(1024*1024):.1f} MB)")
-            print(f"   Peer: {peer_id} ({peer_ip})")
-        
-        return None
-    
-    def _manejar_nuevo_peer(self, mensaje, addr):
-        nueva_ip = mensaje['ip']
-        if nueva_ip != self.peer.mi_ip and nueva_ip not in self.peer.peers_conocidos:
-            self.peer.peers_conocidos[nueva_ip] = time.time()
-            print(f"\nNuevo peer añadido (propagado): {nueva_ip}")
-        return None
-    
-    def _manejar_solicitud_peers(self, mensaje, addr):
-        return {
-            'tipo': 'LISTA_PEERS',
-            'peers': list(self.peer.peers_conocidos.keys()),
-            'token': self.peer.auth_token
-        }
+from skeleton import PeerSkeleton
+from stub import PeerStub
+from marshalling import Marshalling
 
 # P2P general
 class P2P_Peer:
-    def __init__(self):
-        self.mi_ip = self.obtener_ip_local()
-        self.puerto_control = 5000
-        self.puerto_datos = 5001
-        self.puerto_discovery = 5003
-        self.puerto_heartbeat = 5004
-        self.puerto_anuncios = 5005
+    """
+    Clase principal que representa un peer en la red P2P.
+    Maneja la comunicación con otros peers, el descubrimiento,
+    la compartición y descarga de archivos, y el mantenimiento
+    de la red.
+    """
 
-        self.password_red = "el_shrek" 
-        self.auth_token = hashlib.sha256(self.password_red.encode()).hexdigest()
-        self.llave_aes = hashlib.sha256(self.password_red.encode()).digest()
-        
+    def __init__(self):
+        # Contraseña común para todos los peers (autenticación simple)
+        self.PASSWORD = "el_shrek"
+        # Carpeta donde se colocan los archivos a compartir
+        self.RUTA_COMPARTIR = Path("compartir")
+        # Carpeta donde se guardan las descargas
+        self.RUTA_DESCARGAS = Path("descargas")
+
+        # Obtener IP Local para descubrimiento de red
+        self.mi_ip = self.obtener_ip_local()
+
+        # Puertos reservados para operaciones
+        self.puerto_control = 5000      # Búsquedas y solicitudes de descarga
+        self.puerto_datos = 5001        # Transferencia de archivos
+        self.puerto_discovery = 5003    # Descubrimiento inicial
+        self.puerto_heartbeat = 5004    # Heartbeats y estado de peers
+        self.puerto_anuncios = 5005     # Anuncios de nuevos archivos
+
+        # Generacion de claves para autenticación y cifrado
+        self.auth_token = hashlib.sha256(self.PASSWORD.encode()).hexdigest()
+        self.llave_aes = hashlib.sha256(self.PASSWORD.encode()).digest()
+        # Identificador propio/unico en la red (se genera a partir de IP y puerto)
         self.mi_id = hashlib.sha256(f"{self.mi_ip}:{self.puerto_control}".encode()).hexdigest()[:8]
-        self.peers_conocidos = {}
-        self.stubs = {}
         
-        self.ruta_compartir = Path("compartir")
-        self.ruta_descargas = Path("descargas")
-        self.mis_archivos = {}
-        self.corriendo = True
+        # Peers conocidos de la red completa, con estampas de tiempo de vida por peer
+        self.peers_conocidos = {}  # ip -> timestamp ultimo heartbeat
+        self.stubs = {}  # Caché de objetos stub para comunicación con cada peer
+        
+        # Archivos conocidos en la red (nombre -> lista de (ip, peer_id))
+        self.file_peers = {}
         
         print(f"\nPEER INICIADO: {self.mi_id}")
         print(f"IP: {self.mi_ip}")
@@ -572,28 +61,46 @@ class P2P_Peer:
         print(f"Heartbeat: {self.puerto_heartbeat}")
         print(f"Anuncios: {self.puerto_anuncios}")
         
-        self.ruta_compartir.mkdir(exist_ok=True)
-        self.ruta_descargas.mkdir(exist_ok=True)
-        
+        # Crear rutas de archivos si no existen
+        self.RUTA_COMPARTIR.mkdir(exist_ok=True)
+        self.RUTA_DESCARGAS.mkdir(exist_ok=True)
+        # Diccionario con los archivos que este peer comparte (nombre -> info)
+        self.mis_archivos = {}
+        # Objeto que procesa las solicitudes entrantes
         self.skeleton = PeerSkeleton(self)
         
-        self.escanear_archivos()
-        self.iniciar_servicios()
+        # Marcar nodo como iniciado
+        self.corriendo = True
+        self.escanear_archivos()      # Escanea la carpeta compartir al inicio
+        self.iniciar_servicios()      # Lanza los hilos de los servidores
         
+        # Resultados para archivos en red (última búsqueda)
         self.results = []
     
     def obtener_ip_local(self):
+        """
+        Obtiene la dirección IP local del equipo en la red.
+        Si no puede determinarla, asume 127.0.0.1 (localhost).
+        """
         try:
+            # Crear socket dummy para conocer la ip
             s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            # Conectar a cualquier direccion (no envía datos realmente)
             s.connect(("8.8.8.8", 80))
-            ip = s.getsockname()[0]
+            ip = s.getsockname()[0]  # Obtener IP de la interfaz usada
             s.close()
             return ip
         except:
+            # Si falla (sin red), asumir localhost
             return "127.0.0.1"
     
     def obtener_stub(self, peer_ip):
+        """
+        Devuelve un objeto stub para comunicarse con un peer dado.
+        Si no existe, lo crea y lo guarda en caché.
+        """
         if peer_ip not in self.stubs:
+            # Crear stub con la IP, puerto de control y token de autenticación
             self.stubs[peer_ip] = PeerStub(
                 peer_ip,
                 self.puerto_control,
@@ -602,35 +109,53 @@ class P2P_Peer:
         return self.stubs[peer_ip]
     
     def iniciar_servicios(self):
+        """
+        Inicia todos los hilos de servidores (TCP y UDP) que atienden
+        las distintas funciones del peer, así como los hilos de mantenimiento.
+        """
+        # Servidores principales (cada uno en su propio hilo)
         threading.Thread(target=self.servidor_control, daemon=True).start()
         threading.Thread(target=self.servidor_datos, daemon=True).start()
         threading.Thread(target=self.servidor_discovery, daemon=True).start()
         threading.Thread(target=self.servidor_heartbeat, daemon=True).start()
         threading.Thread(target=self.servidor_anuncios, daemon=True).start()
         
+        # Hilos de mantenimiento
         threading.Thread(target=self.heartbeat_loop, daemon=True).start()
         threading.Thread(target=self.monitor_archivos, daemon=True).start()
         
-        time.sleep(1)
-        self.descubrir_red()
+        time.sleep(1)  # Pequeña pausa para que los servidores arranquen
+        self.descubrir_red()  # Iniciar descubrimiento de peers
     
     def servidor_control(self):
+        """
+        Servidor TCP en el puerto de control.
+        Atiende solicitudes de búsqueda y peticiones de descarga.
+        Pasa los datos al skeleton para procesarlos.
+        """
         servidor = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        servidor.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        servidor.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)  # Reutilizar puerto
         servidor.bind((self.mi_ip, self.puerto_control))
-        servidor.listen(20)
-        servidor.settimeout(1)
+        servidor.listen(20)  # Máximo 20 conexiones en cola
+        servidor.settimeout(1)  # Timeout para poder salir del bucle al cerrar
         
         while self.corriendo:
             try:
-                cliente, addr = servidor.accept()
+                cliente, addr = servidor.accept()  # Aceptar nueva conexión
+                # Atender cada cliente en un hilo separado
                 threading.Thread(target=self.manejar_control_con_skeleton, 
                                args=(cliente, addr), daemon=True).start()
+            except socket.timeout:
+                continue  # Timeout, volver a comprobar bandera de corrido
             except:
                 continue
         servidor.close()
     
     def servidor_datos(self):
+        """
+        Servidor TCP en el puerto de datos.
+        Se encarga de enviar el archivo solicitado a otro peer.
+        """
         servidor = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         servidor.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         servidor.bind((self.mi_ip, self.puerto_datos))
@@ -641,28 +166,40 @@ class P2P_Peer:
             try:
                 cliente, addr = servidor.accept()
                 threading.Thread(target=self.manejar_datos, args=(cliente, addr), daemon=True).start()
+            except socket.timeout:
+                continue
             except:
                 continue
         servidor.close()
     
     def servidor_discovery(self):
+        """
+        Servidor UDP para descubrimiento de peers.
+        Responde a mensajes broadcast de discovery y solicitudes de lista de peers.
+        """
         servidor = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         servidor.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        servidor.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        servidor.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)  # Permitir broadcast
         servidor.bind((self.mi_ip, self.puerto_discovery))
         servidor.settimeout(1)
         
         while self.corriendo:
             try:
-                data, addr = servidor.recvfrom(1024)
+                data, addr = servidor.recvfrom(1024)  # Recibir datagrama
                 respuesta = self.skeleton.procesar_solicitud_udp(data, addr)
                 if respuesta:
-                    servidor.sendto(respuesta, addr)
+                    servidor.sendto(respuesta, addr)  # Enviar respuesta al mismo origen
+            except socket.timeout:
+                continue
             except:
                 continue
         servidor.close()
     
     def servidor_heartbeat(self):
+        """
+        Servidor UDP para recibir heartbeats de otros peers.
+        También puede propagar información de peers.
+        """
         servidor = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         servidor.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         servidor.bind((self.mi_ip, self.puerto_heartbeat))
@@ -671,12 +208,18 @@ class P2P_Peer:
         while self.corriendo:
             try:
                 data, addr = servidor.recvfrom(1024)
-                self.skeleton.procesar_solicitud_udp(data, addr)
+                self.skeleton.procesar_solicitud_udp(data, addr)  # No necesita respuesta
+            except socket.timeout:
+                continue
             except:
                 continue
         servidor.close()
     
     def servidor_anuncios(self):
+        """
+        Servidor UDP para recibir anuncios de nuevos archivos compartidos
+        por otros peers (broadcast o unicast).
+        """
         servidor = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         servidor.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         servidor.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
@@ -687,49 +230,67 @@ class P2P_Peer:
             try:
                 data, addr = servidor.recvfrom(2048)
                 self.skeleton.procesar_solicitud_udp(data, addr)
+            except socket.timeout:
+                continue
             except:
                 continue
         servidor.close()
     
     def manejar_control_con_skeleton(self, cliente, addr):
+        """
+        Lee una solicitud TCP entrante (puerto control) y la pasa al skeleton
+        para que la procese. Envía la respuesta de vuelta.
+        """
         try:
-            data = cliente.recv(8192)
+            data = cliente.recv(8192)  # Recibir datos del cliente
             if not data:
                 return
             
             respuesta = self.skeleton.procesar_solicitud_tcp(data, addr)
             if respuesta:
-                cliente.send(respuesta)
+                cliente.send(respuesta)  # Enviar respuesta
         except Exception as e:
             print(f"Error en control: {e}")
         finally:
-            cliente.close()
+            cliente.close()  # Cerrar conexión
     
     def manejar_datos(self, cliente, addr):
+        """
+        Maneja una conexión entrante en el puerto de datos.
+        Recibe la solicitud de descarga (con posible offset y length) y envía el archivo
+        cifrado al solicitante.
+        """
         try:
-            data = cliente.recv(1024).decode()
+            data = cliente.recv(1024)
             if not data:
                 return
-                
-            mensaje = json.loads(data)
-
+            mensaje = Marshalling.unmarshal(data)  # Deserializar
+            if not mensaje:
+                return
+            # Verificar autenticación
             if mensaje.get("token") != self.auth_token:
                 print(f"\nIntento de descarga bloqueado desde {addr[0]}")
                 return
-            
             if mensaje["tipo"] == "DESCARGA":
-                self.enviar_archivo(cliente, mensaje["archivo"])
-                
+                archivo = mensaje["archivo"]
+                offset = mensaje.get("offset", 0)
+                length = mensaje.get("length", 0)
+                self.enviar_archivo(cliente, archivo, offset, length)
         except Exception as e:
             print(f"Error en datos: {e}")
         finally:
             cliente.close()
     
     def escanear_archivos(self):
+        """
+        Escanea la carpeta 'compartir' y actualiza la lista de archivos locales.
+        Si detecta archivos nuevos, los anuncia a la red.
+        """
         archivos_anteriores = set(self.mis_archivos.keys())
         archivos_nuevos = {}
         
-        for archivo in self.ruta_compartir.glob("*"):
+        # Recorrer todos los archivos en la carpeta compartir
+        for archivo in self.RUTA_COMPARTIR.glob("*"):
             if archivo.is_file():
                 stats = archivo.stat()
                 archivos_nuevos[archivo.name] = {
@@ -737,6 +298,7 @@ class P2P_Peer:
                     "ruta": str(archivo)
                 }
         
+        # Detectar cuáles son nuevos (no estaban antes)
         nuevos = set(archivos_nuevos.keys()) - archivos_anteriores
         self.mis_archivos = archivos_nuevos
         
@@ -744,33 +306,54 @@ class P2P_Peer:
             print(f"\nNuevos archivos compartidos localmente:")
             for archivo in nuevos:
                 print(f"   - {archivo}")
-                self.anunciar_archivo_nuevo(archivo)
+                self.anunciar_archivo_nuevo(archivo)  # Anunciar a la red
     
     def monitor_archivos(self):
+        """
+        Hilo que cada 5 segundos vuelve a escanear la carpeta compartir
+        para detectar cambios (archivos nuevos).
+        """
         while self.corriendo:
             time.sleep(5)
             self.escanear_archivos()
     
     def heartbeat_loop(self):
+        """
+        Hilo que cada 10 segundos envía heartbeats a todos los peers conocidos
+        y luego limpia los peers inactivos.
+        """
         while self.corriendo:
             time.sleep(10)
             self.enviar_heartbeat()
             self.limpiar_peers_inactivos()
     
     def limpiar_peers_inactivos(self):
+        """
+        Elimina de la lista de peers conocidos aquellos que no han enviado
+        heartbeat en más de 30 segundos. También los elimina de file_peers.
+        """
         ahora = time.time()
         inactivos = []
         
         for ip, ultimo in list(self.peers_conocidos.items()):
-            if ahora - ultimo > 30:
+            if ahora - ultimo > 30:  # Si no hay heartbeat en los últimos 30s
                 inactivos.append(ip)
         
         for ip in inactivos:
             del self.peers_conocidos[ip]
             if ip in self.stubs:
                 del self.stubs[ip]
+            # Eliminar de file_peers
+            for fname, peers in list(self.file_peers.items()):
+                self.file_peers[fname] = [p for p in peers if p[0] != ip]
+                if not self.file_peers[fname]:
+                    del self.file_peers[fname]
     
     def enviar_heartbeat(self):
+        """
+        Envía un mensaje UDP de heartbeat a cada peer conocido para indicar
+        que este peer sigue activo.
+        """
         for ip in list(self.peers_conocidos.keys()):
             try:
                 mensaje = Marshalling.marshal('HEARTBEAT',
@@ -783,9 +366,13 @@ class P2P_Peer:
                 sock.sendto(mensaje, (ip, self.puerto_heartbeat))
                 sock.close()
             except:
-                pass
+                pass  # Si falla, ignorar (el peer se limpiará después)
     
     def anunciar_archivo_nuevo(self, nombre_archivo):
+        """
+        Anuncia a la red (broadcast y a peers conocidos) que este peer
+        está compartiendo un archivo nuevo.
+        """
         if nombre_archivo not in self.mis_archivos:
             return
         
@@ -797,6 +384,7 @@ class P2P_Peer:
                                      tamaño=info["tamaño"],
                                      token=self.auth_token)
         
+        # Broadcast a toda la red local
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
@@ -805,6 +393,7 @@ class P2P_Peer:
         except:
             pass
         
+        # También enviar directamente a cada peer conocido
         for ip in list(self.peers_conocidos.keys()):
             try:
                 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -814,12 +403,17 @@ class P2P_Peer:
                 pass
     
     def descubrir_red(self):
+        """
+        Busca otros peers en la red mediante un mensaje broadcast.
+        Recoge las respuestas y luego pide a los peers encontrados
+        su lista de peers para ampliar el conocimiento de la red.
+        """
         print("\nBuscando peers en la red...")
         
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-            sock.settimeout(3)
+            sock.settimeout(3)  # Esperar respuestas durante 3 segundos
             
             mensaje = Marshalling.marshal('DISCOVERY',
                                          ip=self.mi_ip,
@@ -834,6 +428,7 @@ class P2P_Peer:
                     data, addr = sock.recvfrom(1024)
                     respuesta = Marshalling.unmarshal(data)
                     
+                    # Verificar que la respuesta sea válida y no de uno mismo
                     if respuesta and respuesta.get("token") == self.auth_token and \
                        respuesta["tipo"] == "DISCOVERY_RESPONSE" and \
                        addr[0] != self.mi_ip:
@@ -842,9 +437,12 @@ class P2P_Peer:
                             peers_encontrados.append(addr[0])
                             print(f"Peer encontrado: {addr[0]}")
                             self.peers_conocidos[addr[0]] = time.time()
+                except socket.timeout:
+                    continue
                 except:
                     pass
             
+            # Pedir lista de peers a los encontrados (hasta 3 para no saturar)
             for ip in peers_encontrados[:3]:
                 self.solicitar_lista_peers(ip)
             
@@ -860,6 +458,10 @@ class P2P_Peer:
             sock.close()
     
     def solicitar_lista_peers(self, peer_ip):
+        """
+        Pide a un peer específico su lista de peers conocidos para
+        ampliar nuestro conocimiento de la red.
+        """
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             sock.settimeout(2)
@@ -883,23 +485,39 @@ class P2P_Peer:
             
             sock.close()
         except:
-            pass
+            pass  # Si falla, simplemente no se añaden peers
     
     def buscar(self, query):
+        """
+        Realiza una búsqueda de archivos en la red consultando
+        a los peers conocidos (hasta 10). Muestra los resultados
+        y actualiza file_peers.
+        """
         print(f"\nBuscando '{query}'...")
         
         resultados = []
         peers_consultados = 0
         
+        # Consultar hasta los primeros 10 peers conocidos
         for ip in list(self.peers_conocidos.keys())[:10]:
             try:
                 stub = self.obtener_stub(ip)
-                respuesta = stub.buscar(query)
+                respuesta = stub.buscar(query)  # Llamada remota
                 
                 if respuesta and respuesta.get("resultados"):
-                    resultados.extend(respuesta["resultados"])
+                    for res in respuesta["resultados"]:
+                        if res not in resultados:
+                            resultados.append(res)
+                            # Actualizar file_peers
+                            fname = res['nombre']
+                            if fname not in self.file_peers:
+                                self.file_peers[fname] = []
+                            peer = (res['peer_ip'], res['peer_id'])
+                            if peer not in self.file_peers[fname]:
+                                self.file_peers[fname].append(peer)
                     peers_consultados += 1
-            except:
+            except Exception:
+                # Si hay error, eliminar peer de la lista
                 if ip in self.peers_conocidos:
                     del self.peers_conocidos[ip]
                 if ip in self.stubs:
@@ -909,7 +527,7 @@ class P2P_Peer:
         
         if resultados:
             print(f"Encontrados {len(resultados)} resultados:")
-            self.results = []
+            self.results = []  # Guardar nombres para facilitar descarga
             for i, res in enumerate(resultados, 1):
                 self.results.append(res['nombre'])
                 tamaño_mb = res["tamaño"] / (1024*1024)
@@ -920,109 +538,199 @@ class P2P_Peer:
         
         return resultados
     
-    def descargar(self, nombre_archivo, peer_ip, callback_progress=None):
-        if peer_ip not in self.peers_conocidos:
-            print("Peer no conocido")
-            return
-        
-        for archive in self.results:
-            if nombre_archivo in archive:
-                nombre_archivo = archive
-                break
-
-        print(f"\nSolicitando descarga de '{nombre_archivo}' desde {peer_ip}...")
-        
+    def download_piece(self, peer_ip, archivo, offset, length):
+        """
+        Descarga una pieza específica de un peer y retorna los datos.
+        """
+        sock = None
         try:
-            stub = self.obtener_stub(peer_ip)
-            respuesta = stub.solicitar_descarga(nombre_archivo)
-            
-            if not respuesta or respuesta.get('tipo') != 'DESCARGA_AUTORIZADA':
-                print(f"Error: {respuesta.get('mensaje', 'Desconocido')}")
-                return
-            
-            md5_esperado = respuesta.get("md5")
-
-            sock_datos = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock_datos.settimeout(10)
-            sock_datos.connect((peer_ip, self.puerto_datos))
-            
-            sock_datos.send(json.dumps({
-                "tipo": "DESCARGA",
-                "archivo": nombre_archivo,
-                "token": self.auth_token
-            }).encode())
-            
-            ruta = self.ruta_descargas / nombre_archivo
-            tamaño = respuesta["tamaño"]
-            recibido = 0
-            
-            print(f"Tamaño: {tamaño/(1024*1024):.1f} MB")
-
-            nonce = sock_datos.recv(16)
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(10)
+            sock.connect((peer_ip, self.puerto_datos))
+            msg = Marshalling.marshal('DESCARGA', archivo=archivo, token=self.auth_token, offset=offset, length=length)
+            sock.send(msg)
+            # Recibir nonce
+            nonce = b''
+            while len(nonce) < 16:
+                chunk = sock.recv(16 - len(nonce))
+                if not chunk:
+                    raise Exception("Conexión cerrada al recibir nonce")
+                nonce += chunk
             cipher = Cipher(algorithms.AES(self.llave_aes), modes.CTR(nonce))
             decryptor = cipher.decryptor()
-
-            md5_descarga = hashlib.md5()
-            
-            with open(ruta, 'wb') as f:
-                while recibido < tamaño:
-                    chunk = sock_datos.recv(65536)
-                    if not chunk:
-                        break
-                    chunk_desencriptado = decryptor.update(chunk)
-                    f.write(chunk_desencriptado)
-                    md5_descarga.update(chunk_desencriptado)
-                    recibido += len(chunk)
-                    
-                    if recibido % (1024*1024) < 65536:
-                        porcentaje = (recibido / tamaño) * 100
-                        print(f"   Progreso: {porcentaje:.1f}% ({recibido/(1024*1024):.1f} MB)")
-                        
-                        # Avisamos a la GUI
-                        if callback_progress:
-                            callback_progress(porcentaje)
-            
-            # Aseguramos el 100% al terminar
-            if callback_progress:
-                callback_progress(100.0)
-
-            sock_datos.close()
-            print(f"Descarga completada: {ruta}")
-            
-            if md5_esperado:
-                md5_obtenido = md5_descarga.hexdigest()
-                if md5_obtenido == md5_esperado:
-                    print(f"Integridad verificada: MD5 coincide")
-                else:
-                    print(f"ADVERTENCIA: El archivo está corrupto o fue modificado.")
-            
+            data = b''
+            remaining = length
+            while remaining > 0:
+                chunk = sock.recv(min(65536, remaining))
+                if not chunk:
+                    break
+                data += decryptor.update(chunk)
+                remaining -= len(chunk)
+            if len(data) != length:
+                raise Exception(f"Tamaño recibido incorrecto: {len(data)} vs {length}")
+            return data
         except Exception as e:
-            print(f"Error en descarga: {e}")
+            raise e
+        finally:
+            if sock:
+                sock.close()
     
-    def enviar_archivo(self, cliente, archivo):
-        ruta = self.ruta_compartir / archivo
+    def descargar_multifuente(self, nombre_archivo): # Verificar como implementar en gui
+        if nombre_archivo not in self.file_peers or not self.file_peers[nombre_archivo]:
+            print("No se conocen peers que tengan ese archivo.")
+            return
+        peer_list = self.file_peers[nombre_archivo]
+        # Usar el primer peer para obtener metadatos
+        peer_ip, peer_id = peer_list[0]
+        stub = self.obtener_stub(peer_ip)
+        respuesta = stub.solicitar_descarga(nombre_archivo)
+        if not respuesta or respuesta.get('tipo') != 'DESCARGA_AUTORIZADA':
+            print("No se pudo obtener información del archivo.")
+            return
+        tamaño = respuesta['tamaño']
+        md5_esperado = respuesta.get('md5')
+        
+        PIECE_SIZE = 256 * 1024
+        num_pieces = (tamaño + PIECE_SIZE - 1) // PIECE_SIZE
+        
+        ruta = self.RUTA_DESCARGAS / nombre_archivo
+        start_piece = 0
+        file_exists = ruta.exists()
+        if file_exists:
+            tamaño_actual = ruta.stat().st_size
+            if tamaño_actual == tamaño:
+                print("El archivo ya está completo.")
+                return
+            elif tamaño_actual < tamaño:
+                op = input(f"El archivo {nombre_archivo} ya existe pero está incompleto ({tamaño_actual}/{tamaño} bytes). ¿Reanudar? (s/n): ").strip().lower()
+                if op == 's':
+                    start_piece = tamaño_actual // PIECE_SIZE
+                    # la pieza parcial se reescribirá completa
+                else:
+                    # Sobrescribir
+                    ruta.unlink()
+                    file_exists = False
+            else:
+                print("El archivo existente es más grande de lo esperado. Se sobrescribirá.")
+                ruta.unlink()
+                file_exists = False
+        
+        # Abrir archivo en modo adecuado
+        if file_exists and start_piece > 0:
+            f = open(ruta, 'r+b')
+        else:
+            f = open(ruta, 'w+b')
+        
+        # Cola de piezas pendientes
+        piece_queue = queue.Queue()
+        for i in range(start_piece, num_pieces):
+            piece_queue.put(i)
+        
+        completed = start_piece
+        lock = threading.Lock()
+        
+        def worker():
+            nonlocal completed
+            while True:
+                try:
+                    piece_idx = piece_queue.get(timeout=1)
+                except queue.Empty:
+                    break
+                offset = piece_idx * PIECE_SIZE
+                length = min(PIECE_SIZE, tamaño - offset)
+                success = False
+                random.shuffle(peer_list)  # Balancear carga
+                for p_ip, p_id in peer_list:
+                    try:
+                        data = self.download_piece(p_ip, nombre_archivo, offset, length)
+                        with lock:
+                            f.seek(offset)
+                            f.write(data)
+                            f.flush()
+                            completed += 1
+                            print(f"Pieza {piece_idx+1}/{num_pieces} completada ({completed*100/num_pieces:.1f}%)")
+                        success = True
+                        break
+                    except Exception as e:
+                        print(f"Error descargando pieza {piece_idx} desde {p_ip}: {e}")
+                        continue
+                if not success:
+                    print(f"No se pudo descargar la pieza {piece_idx}. Abortando.")
+                    piece_queue.task_done()
+                    break
+                piece_queue.task_done()
+        
+        num_workers = min(5, len(peer_list))
+        threads = []
+        for _ in range(num_workers):
+            t = threading.Thread(target=worker, daemon=True)
+            t.start()
+            threads.append(t)
+        
+        for t in threads:
+            t.join()
+        
+        f.close()
+        
+        if completed == num_pieces:
+            print("Descarga completada.")
+            if md5_esperado:
+                md5_calc = hashlib.md5()
+                with open(ruta, 'rb') as ff:
+                    for chunk in iter(lambda: ff.read(65536), b''):
+                        md5_calc.update(chunk)
+                if md5_calc.hexdigest() == md5_esperado:
+                    print("Integridad verificada: MD5 coincide.")
+                else:
+                    print("ADVERTENCIA: MD5 no coincide. Archivo corrupto.")
+        else:
+            print(f"Descarga incompleta. Se guardaron {completed} de {num_pieces} piezas.")
+    
+    def enviar_archivo(self, cliente, archivo, offset=0, length=0):
+        """
+        Envía un archivo solicitado a través de la conexión de datos.
+        Aplica cifrado AES-CTR y soporta envío parcial (offset y length).
+        """
+        ruta = self.RUTA_COMPARTIR / archivo
         if not ruta.exists():
             return
         
+        file_size = ruta.stat().st_size
+        if offset >= file_size:
+            return
+        if length == 0:
+            length = file_size - offset
+        else:
+            length = min(length, file_size - offset)
+        
+        # Generar nonce aleatorio para este envío
         nonce = os.urandom(16)
         cliente.send(nonce)
         cipher = Cipher(algorithms.AES(self.llave_aes), modes.CTR(nonce))
         encryptor = cipher.encryptor()
         
         with open(ruta, 'rb') as f:
-            while True:
-                chunk = f.read(65536)
+            f.seek(offset)
+            remaining = length
+            while remaining > 0:
+                chunk = f.read(min(65536, remaining))
                 if not chunk:
                     break
-                cliente.send(encryptor.update(chunk))
+                encrypted_chunk = encryptor.update(chunk)
+                cliente.send(encrypted_chunk)
+                remaining -= len(chunk)
     
     def menu(self):
+        """
+        Menú interactivo para el usuario. Permite buscar, ver archivos,
+        ver peers, descargar (multifuente) y salir.
+        """
         while self.corriendo:
             print(f"\nPEER: {self.mi_id} - {len(self.peers_conocidos)} peers")
             print("1. Buscar archivos")
             print("2. Ver mis archivos")
             print("3. Ver peers")
-            print("4. Descargar")
+            print("4. Descargar (multifuente)")
             print("5. Salir")
             
             op = input("\nOpción: ").strip()
@@ -1049,9 +757,8 @@ class P2P_Peer:
                     print("   No hay peers conocidos")
             elif op == "4":
                 nombre = input("Archivo: ").strip()
-                ip = input("IP peer: ").strip()
-                if nombre and ip:
-                    self.descargar(nombre, ip)
+                if nombre:
+                    self.descargar_multifuente(nombre)
             elif op == "5":
                 self.corriendo = False
                 break
