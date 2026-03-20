@@ -637,7 +637,8 @@ class P2P_Peer:
                 pieces_done = [False] * num_pieces
                 completed = 0
             """
-            print("Archivo parcial encontrado ({completed}/{num_pieces} piezas")
+            time.sleep(1)
+            print(f"Archivo parcial encontrado ({completed}/{num_pieces} piezas")
             # Sobrescribir eliminanando archivos y empezar de cero
             ruta.unlink()
             meta_ruta.unlink()
