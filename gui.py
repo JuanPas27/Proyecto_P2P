@@ -374,6 +374,7 @@ class BibliotecaGUI:
             try:
                 # Llamada al método multifuente del nodo P2P
                 self.nodo.descargar_multifuente(titulo_seleccionado, callback_progress=actualizar_barra)
+                # En caso de encontrar registro de descarga previa, continua desde donde la dejo anteriormente
                 self.window.after(0, lambda: finalizar_descarga("¡Descarga Completada!", "#69ff6e"))
             except Exception as e:
                 self.window.after(0, lambda: finalizar_descarga(f"Error: {e}", "#ff5252"))
