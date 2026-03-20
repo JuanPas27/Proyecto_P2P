@@ -4,7 +4,7 @@ from tkinter import messagebox, filedialog
 import threading
 import shutil
 import os
-import peer
+import peer_stub as peer
 
 # Configuración global del tema
 ctk.set_appearance_mode("dark")  # Modo oscuro por defecto
@@ -212,7 +212,7 @@ class BibliotecaGUI:
             """
             lista_compartidos.delete(0, tk.END)
             try:
-                archivos = os.listdir(self.nodo.ruta_compartir)
+                archivos = os.listdir(self.nodo.RUTA_COMPARTIR)
                 if archivos:
                     for arch in archivos:
                         lista_compartidos.insert(tk.END, f" {arch}")
@@ -230,7 +230,7 @@ class BibliotecaGUI:
             ruta_archivo = filedialog.askopenfilename(title="Selecciona archivo para compartir")
             if ruta_archivo:
                 try:
-                    destino = os.path.join(self.nodo.ruta_compartir, os.path.basename(ruta_archivo))
+                    destino = os.path.join(self.nodo.RUTA_COMPARTIR, os.path.basename(ruta_archivo))
                     shutil.copy2(ruta_archivo, destino)
                     self.nodo.escanear_archivos()
                     messagebox.showinfo("Compartir",
@@ -274,7 +274,7 @@ class BibliotecaGUI:
         lista_descargas.pack(fill="both", expand=True, padx=10, pady=10)
 
         try:
-            archivos = os.listdir(self.nodo.ruta_descargas)
+            archivos = os.listdir(self.nodo.RUTA_DESCARGAS)
             if archivos:
                 for arch in archivos:
                     lista_descargas.insert(tk.END, f" {arch}")
@@ -283,7 +283,7 @@ class BibliotecaGUI:
         except FileNotFoundError:
             lista_descargas.insert(tk.END, " Carpeta de descargas no encontrada.")
 
-    def abrir_ventana_descarga(self):
+    '''def abrir_ventana_descarga(self):
         """
         Abre la ventana donde se van a descargar los archivos.
         La ventana se abre una vez que se haya seleccionado con el mouse el archivo a descargar.
@@ -375,6 +375,101 @@ class BibliotecaGUI:
                           corner_radius=20,
                           width=100,
                           command=vent.destroy).pack(pady=10)
+
+        # Inicia el hilo de descarga automáticamente sin esperar un clic extra
+        threading.Thread(target=hilo_descarga, daemon=True).start()'''
+
+    def abrir_ventana_descarga(self):
+        """
+        Abre la ventana donde se van a descargar los archivos.
+        La ventana se abre una vez que se haya seleccionado con el mouse el archivo a descargar.
+        De la selección se obtiene el título y se inicia la descarga multifuente.
+        """
+        seleccion = self.lista_resultados.curselection()  # Método de selección con el mouse
+
+        # Valida la seleccion
+        if not seleccion:
+            messagebox.showwarning("Atención", "Por favor, selecciona un archivo de la lista de resultados primero.")
+            return
+
+        # Extrae el texto del elemento seleccionado
+        item_texto = self.lista_resultados.get(seleccion[0])
+
+        # Valida que no haya seleccionado los mensajes de "Buscando..." o "No se encontraron..."
+        if "IP:" not in item_texto:
+            messagebox.showwarning("Atención", "Selección no válida.")
+            return
+
+        # Separa el texto para sacar el título
+        try:
+            # El texto tiene el formato: " titulo.pdf  |  2.5 MB  |  IP: 192.168.1.5"
+            partes = item_texto.split("  |  ")
+            titulo_seleccionado = partes[0].strip()  # elimina espacios extra
+        except Exception as e:
+            messagebox.showerror("Error", "No se pudo leer la información del archivo.")
+            return
+
+        # crea la ventana de progreso de descarga
+        vent = ctk.CTkToplevel(self.window)
+        vent.title("Descargando...")
+        vent.geometry("400x200")
+        vent.attributes('-topmost', True)
+
+        ctk.CTkLabel(vent,
+                    font=("Aptos", 14, "bold"),
+                    text=f"Descargando: {titulo_seleccionado}").pack(pady=(20, 5))
+        ctk.CTkLabel(vent, font=("Aptos", 12),
+                    text="Desde la red P2P (multifuente)").pack(pady=(0, 15))
+
+        progreso = ctk.CTkProgressBar(vent,
+                                    orientation="horizontal",
+                                    mode="determinate",
+                                    width=300)
+        progreso.pack(pady=10)
+        progreso.set(0)  # inicia animacion de descarga en 0
+
+        lbl_estado = ctk.CTkLabel(vent,
+                                text="Conectando... 0%",
+                                font=("Aptos", 12),
+                                text_color="#52a8ff")
+        lbl_estado.pack(pady=5)
+
+        def actualizar_barra(porcentaje):
+            """
+            Actualiza la barra de porcentaje en tiempo real
+            """
+            # CustomTkinter usa valores de 0.0 a 1.0 para la barra
+            valor_barra = porcentaje / 100.0
+
+            # Usamos after(0, ...) para actualizar la GUI de forma segura desde otro hilo
+            self.window.after(0, lambda: [progreso.set(valor_barra),
+                                        lbl_estado.configure(text=f"Descargando... {porcentaje:.1f}%")])
+
+        def hilo_descarga():
+            """
+            Ejecuta la descarga multifuente en segundo plano
+            """
+            try:
+                # Llamada al método multifuente del nodo P2P
+                self.nodo.descargar_multifuente(titulo_seleccionado, callback_progress=actualizar_barra)
+                self.window.after(0, lambda: finalizar_descarga("¡Descarga Completada!", "#69ff6e"))
+            except Exception as e:
+                self.window.after(0, lambda: finalizar_descarga(f"Error: {e}", "#ff5252"))
+
+        def finalizar_descarga(mensaje, color):
+            """
+            Termina ejecucion de descarga y se llena la barra de progreso
+            """
+            progreso.set(1)  # llenado de la barra
+            lbl_estado.configure(text=mensaje, text_color=color)
+
+            # botón para cerrar ventanita cuando termine
+            ctk.CTkButton(vent,
+                        text="Cerrar",
+                        font=("Aptos", 12),
+                        corner_radius=20,
+                        width=100,
+                        command=vent.destroy).pack(pady=10)
 
         # Inicia el hilo de descarga automáticamente sin esperar un clic extra
         threading.Thread(target=hilo_descarga, daemon=True).start()

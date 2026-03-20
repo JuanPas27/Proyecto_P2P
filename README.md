@@ -1,5 +1,10 @@
 # Proyecto_P2P
 
 ## Librerias adicionales
-pip install criptography
-pip install customtkinter
+- criptography
+- install customtkinter
+
+## Instalar librerias
+```cmd
+pip install -r requirements.txt
+```
