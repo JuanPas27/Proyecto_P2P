@@ -304,9 +304,9 @@ class BibliotecaGUI:
         """
         Abre la ventana donde se van a descargar los archivos.
         La ventana se abre una vez que se haya seleccionado con el mouse el archivo a descargar.
-        De la selección se obtiene el titulo y la ip.
+        De la selección se obtiene el título y se inicia la descarga multifuente.
         """
-        seleccion = self.lista_resultados.curselection()  # Metodo de selección con el mouse
+        seleccion = self.lista_resultados.curselection()  # Método de selección con el mouse
 
         # Valida la seleccion
         if not seleccion:
@@ -321,12 +321,11 @@ class BibliotecaGUI:
             messagebox.showwarning("Atención", "Selección no válida.")
             return
 
-        # Separa el texto para sacar el título y la IP
+        # Separa el texto para sacar el título
         try:
             # El texto tiene el formato: " titulo.pdf  |  2.5 MB  |  IP: 192.168.1.5"
             partes = item_texto.split("  |  ")
             titulo_seleccionado = partes[0].strip()  # elimina espacios extra
-            ip_seleccionada = partes[2].replace("IP:", "").strip()
         except Exception as e:
             messagebox.showerror("Error", "No se pudo leer la información del archivo.")
             return
@@ -338,22 +337,22 @@ class BibliotecaGUI:
         vent.attributes('-topmost', True)
 
         ctk.CTkLabel(vent,
-                     font=("Aptos", 14, "bold"),
-                     text=f"Descargando: {titulo_seleccionado}").pack(pady=(20, 5))
+                    font=("Aptos", 14, "bold"),
+                    text=f"Descargando: {titulo_seleccionado}").pack(pady=(20, 5))
         ctk.CTkLabel(vent, font=("Aptos", 12),
-                     text=f"Desde: {ip_seleccionada}").pack(pady=(0, 15))
+                    text="Desde la red P2P (multifuente)").pack(pady=(0, 15))
 
         progreso = ctk.CTkProgressBar(vent,
-                                      orientation="horizontal",
-                                      mode="determinate",
-                                      width=300)
+                                    orientation="horizontal",
+                                    mode="determinate",
+                                    width=300)
         progreso.pack(pady=10)
         progreso.set(0)  # inicia animacion de descarga en 0
 
         lbl_estado = ctk.CTkLabel(vent,
-                                  text="Conectando... 0%",
-                                  font=("Aptos", 12),
-                                  text_color="#52a8ff")
+                                text="Conectando... 0%",
+                                font=("Aptos", 12),
+                                text_color="#52a8ff")
         lbl_estado.pack(pady=5)
 
         def actualizar_barra(porcentaje):
@@ -365,15 +364,15 @@ class BibliotecaGUI:
 
             # Usamos after(0, ...) para actualizar la GUI de forma segura desde otro hilo
             self.window.after(0, lambda: [progreso.set(valor_barra),
-                                          lbl_estado.configure(text=f"Descargando... {porcentaje:.1f}%")])
+                                        lbl_estado.configure(text=f"Descargando... {porcentaje:.1f}%")])
 
         def hilo_descarga():
             """
-            Ejecuta la descarga en segundo plano
+            Ejecuta la descarga multifuente en segundo plano
             """
             try:
-                # se retorna el progreso al backend
-                self.nodo.descargar(titulo_seleccionado, ip_seleccionada, callback_progress=actualizar_barra)
+                # Llamada al método multifuente del nodo P2P
+                self.nodo.descargar_multifuente(titulo_seleccionado, callback_progress=actualizar_barra)
                 self.window.after(0, lambda: finalizar_descarga("¡Descarga Completada!", "#69ff6e"))
             except Exception as e:
                 self.window.after(0, lambda: finalizar_descarga(f"Error: {e}", "#ff5252"))
@@ -387,11 +386,11 @@ class BibliotecaGUI:
 
             # botón para cerrar ventanita cuando termine
             ctk.CTkButton(vent,
-                          text="Cerrar",
-                          font=("Aptos", 12),
-                          corner_radius=20,
-                          width=100,
-                          command=vent.destroy).pack(pady=10)
+                        text="Cerrar",
+                        font=("Aptos", 12),
+                        corner_radius=20,
+                        width=100,
+                        command=vent.destroy).pack(pady=10)
 
         # Inicia el hilo de descarga automáticamente sin esperar un clic extra
         threading.Thread(target=hilo_descarga, daemon=True).start()

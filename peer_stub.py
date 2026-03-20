@@ -575,11 +575,20 @@ class P2P_Peer:
             if sock:
                 sock.close()
     
-    def descargar_multifuente(self, nombre_archivo): # Verificar como implementar en gui
+    def descargar_multifuente(self, nombre_archivo, callback_progress=None):
+        """
+        Descarga un archivo desde múltiples peers simultáneamente.
+            Dividir en piezas de 256 KB.
+            Reintentar cada pieza maximo 3 veces con diferentes peers.
+            Guardar un archivo de metadatos (.meta) para reanudación de descarga.
+            Se añade dinámicamente nuevos peers que aparezcan durante la descarga.
+        """
+        # Verificar que existan peers con el archivo
         if nombre_archivo not in self.file_peers or not self.file_peers[nombre_archivo]:
             print("No se conocen peers que tengan ese archivo.")
             return
-        peer_list = self.file_peers[nombre_archivo]
+
+        peer_list = self.file_peers[nombre_archivo][:]  # copia inicial
         # Usar el primer peer para obtener metadatos
         peer_ip, peer_id = peer_list[0]
         stub = self.obtener_stub(peer_ip)
@@ -587,51 +596,83 @@ class P2P_Peer:
         if not respuesta or respuesta.get('tipo') != 'DESCARGA_AUTORIZADA':
             print("No se pudo obtener información del archivo.")
             return
+
         tamaño = respuesta['tamaño']
         md5_esperado = respuesta.get('md5')
-        
-        PIECE_SIZE = 256 * 1024
+        PIECE_SIZE = 256 * 1024  # 256 KB por pieza
         num_pieces = (tamaño + PIECE_SIZE - 1) // PIECE_SIZE
-        
+
         ruta = self.RUTA_DESCARGAS / nombre_archivo
-        start_piece = 0
-        file_exists = ruta.exists()
-        if file_exists:
-            tamaño_actual = ruta.stat().st_size
-            if tamaño_actual == tamaño:
-                print("El archivo ya está completo.")
-                return
-            elif tamaño_actual < tamaño:
-                op = input(f"El archivo {nombre_archivo} ya existe pero está incompleto ({tamaño_actual}/{tamaño} bytes). ¿Reanudar? (s/n): ").strip().lower()
-                if op == 's':
-                    start_piece = tamaño_actual // PIECE_SIZE
-                    # la pieza parcial se reescribirá completa
-                else:
-                    # Sobrescribir
-                    ruta.unlink()
-                    file_exists = False
-            else:
-                print("El archivo existente es más grande de lo esperado. Se sobrescribirá.")
+        meta_ruta = self.RUTA_DESCARGAS / (nombre_archivo + ".meta")
+
+        # Verificar y leer estado previo de descarga si existe el archivo de metadatos
+        pieces_done = [False] * num_pieces
+        if meta_ruta.exists():
+            try:
+                with open(meta_ruta, 'rb') as mf:
+                    bitmap = mf.read()
+                    for i in range(num_pieces):
+                        byte_idx = i // 8
+                        bit_idx = i % 8
+                        if byte_idx < len(bitmap):
+                            pieces_done[i] = (bitmap[byte_idx] >> bit_idx) & 1
+            except:
+                pass
+
+        completed = sum(pieces_done)
+
+        # Verificar si el archivo ya está completo
+        if completed == num_pieces and ruta.exists():
+            print("El archivo ya está completo.")
+            return
+
+        # Si el archivo existe pero está incompleto, preguntar por reanudacion
+        if ruta.exists() and not all(pieces_done):
+            op = input(f"Archivo parcial encontrado ({completed}/{num_pieces} piezas). ¿Reanudar? (s/n): ").strip().lower()
+            if op != 's':
+                # Sobrescribir eliminanando archivos y empezar de cero
                 ruta.unlink()
-                file_exists = False
-        
-        # Abrir archivo en modo adecuado
-        if file_exists and start_piece > 0:
-            f = open(ruta, 'r+b')
-        else:
-            f = open(ruta, 'w+b')
-        
-        # Cola de piezas pendientes
+                meta_ruta.unlink()
+                pieces_done = [False] * num_pieces
+                completed = 0
+        elif not ruta.exists():
+            # Crear archivo vacío del tamaño correcto
+            with open(ruta, 'wb') as f:
+                f.truncate(tamaño)
+
+        # Abrir archivo en modo lectura - escritura
+        f = open(ruta, 'r+b')
+
+        # Cola de piezas pendientes con las que faltan
         piece_queue = queue.Queue()
-        for i in range(start_piece, num_pieces):
-            piece_queue.put(i)
-        
-        completed = start_piece
+        for i in range(num_pieces):
+            if not pieces_done[i]:
+                piece_queue.put(i)
+
+        # Hilo de descarga para cada pieza
         lock = threading.Lock()
-        
+        max_retries = 3
+        piece_retries = {}
+        abort = False
+
+        def guardar_estado():
+            """Guarda el bitmap de piezas completadas en el archivo .meta"""
+            bitmap = bytearray((num_pieces + 7) // 8)
+            for i, done in enumerate(pieces_done):
+                if done:
+                    byte_idx = i // 8
+                    bit_idx = i % 8
+                    bitmap[byte_idx] |= (1 << bit_idx)
+            with open(meta_ruta, 'wb') as mf:
+                mf.write(bitmap)
+
         def worker():
-            nonlocal completed
-            while True:
+            """
+            Función que ejecuta cada hilo worker.
+            Toma piezas de la cola y las descarga de cualquier peer disponible con el archivo.
+            """
+            nonlocal completed, abort
+            while not abort:
                 try:
                     piece_idx = piece_queue.get(timeout=1)
                 except queue.Empty:
@@ -639,41 +680,75 @@ class P2P_Peer:
                 offset = piece_idx * PIECE_SIZE
                 length = min(PIECE_SIZE, tamaño - offset)
                 success = False
-                random.shuffle(peer_list)  # Balancear carga
-                for p_ip, p_id in peer_list:
+                # Obtener lista actualizada de peers (puede cambiar durante la descarga)
+                with lock:
+                    current_peers = self.file_peers.get(nombre_archivo, []).copy()
+                random.shuffle(current_peers)  # Balancear carga
+                for p_ip, p_id in current_peers:
                     try:
                         data = self.download_piece(p_ip, nombre_archivo, offset, length)
                         with lock:
+                            if abort or pieces_done[piece_idx]:
+                                piece_queue.task_done()
+                                return
                             f.seek(offset)
                             f.write(data)
                             f.flush()
+                            pieces_done[piece_idx] = True
                             completed += 1
-                            print(f"Pieza {piece_idx+1}/{num_pieces} completada ({completed*100/num_pieces:.1f}%)")
+                            guardar_estado()
+                            # Calcular porcentaje y notificar a la GUI si existe callback
+                            porcentaje = (completed / num_pieces) * 100
+                            print(f"Pieza {piece_idx+1}/{num_pieces} completada ({porcentaje:.1f}%)")
+                            if callback_progress:
+                                callback_progress(porcentaje)
                         success = True
                         break
                     except Exception as e:
                         print(f"Error descargando pieza {piece_idx} desde {p_ip}: {e}")
                         continue
                 if not success:
-                    print(f"No se pudo descargar la pieza {piece_idx}. Abortando.")
-                    piece_queue.task_done()
-                    break
+                    with lock:
+                        retries = piece_retries.get(piece_idx, 0) + 1
+                        if retries <= max_retries:
+                            piece_retries[piece_idx] = retries
+                            piece_queue.put(piece_idx)
+                            print(f"Reintento {retries}/{max_retries} para pieza {piece_idx+1}")
+                        else:
+                            print(f"Pieza {piece_idx+1} falló después de {max_retries} intentos. Abortando.")
+                            abort = True
+                            # Vaciar cola para que otros workers salgan
+                            while not piece_queue.empty():
+                                try:
+                                    piece_queue.get_nowait()
+                                    piece_queue.task_done()
+                                except queue.Empty:
+                                    break
                 piece_queue.task_done()
-        
-        num_workers = min(5, len(peer_list))
+
+        # Lanzar workers (peers)
+        num_workers = min(len(self.file_peers.get(nombre_archivo, [])), 10)
+        if num_workers == 0:
+            print("No hay peers disponibles.")
+            f.close()
+            return
+
         threads = []
         for _ in range(num_workers):
             t = threading.Thread(target=worker, daemon=True)
             t.start()
             threads.append(t)
-        
+
+        # Esperar a que los workers terminen
         for t in threads:
             t.join()
-        
+
         f.close()
-        
+
+        # Verificar si la descarga se completó
         if completed == num_pieces:
             print("Descarga completada.")
+            # Verificar integridad con MD5
             if md5_esperado:
                 md5_calc = hashlib.md5()
                 with open(ruta, 'rb') as ff:
@@ -683,6 +758,9 @@ class P2P_Peer:
                     print("Integridad verificada: MD5 coincide.")
                 else:
                     print("ADVERTENCIA: MD5 no coincide. Archivo corrupto.")
+            # Eliminar metadatos si todo está bien
+            if meta_ruta.exists():
+                meta_ruta.unlink()
         else:
             print(f"Descarga incompleta. Se guardaron {completed} de {num_pieces} piezas.")
     
