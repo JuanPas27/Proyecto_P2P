@@ -5,6 +5,7 @@ import threading
 import shutil
 import os
 import peer_stub as peer
+from database import GestorBiblioteca
 
 # Configuración global del tema
 ctk.set_appearance_mode("dark")  # Modo oscuro por defecto
@@ -14,6 +15,7 @@ ctk.set_default_color_theme("blue")  # Color de acento (botones azules)
 class BibliotecaGUI:
     def __init__(self):
         self.nodo = peer.P2P_Peer()  # Inicializar nodo P2P en segundo plano
+        self.db = GestorBiblioteca() 
 
         # ventana principal con CustomTkinter
         self.window = ctk.CTk()
@@ -130,6 +132,22 @@ class BibliotecaGUI:
                       corner_radius=20,
                       width=140,
                       command=self.abrir_ventana_mis_compartidos).pack(side="left", padx=15)
+        # --- NUEVOS BOTONES PARA LIBROS FÍSICOS ---
+        ctk.CTkButton(frame_botones,
+                      font=("Aptos", 14),
+                      text="Mi Inventario Físico",
+                      corner_radius=20,
+                      width=140,
+                      fg_color="#006400", hover_color="#004d00", # Un tono verde para diferenciarlos
+                      command=self.abrir_ventana_inventario).pack(side="left", padx=15)
+
+        ctk.CTkButton(frame_botones,
+                      font=("Aptos", 14),
+                      text="Pedir Libro Físico",
+                      corner_radius=20,
+                      width=140,
+                      fg_color="#006400", hover_color="#004d00",
+                      command=self.abrir_ventana_pedir_libro).pack(side="left", padx=15)
 
     # logica y eventos
 
@@ -473,6 +491,173 @@ class BibliotecaGUI:
 
         # Inicia el hilo de descarga automáticamente sin esperar un clic extra
         threading.Thread(target=hilo_descarga, daemon=True).start()
+    
+    def abrir_ventana_inventario(self):
+        """
+        Abre una ventana para registrar y ver los libros físicos propios.
+        """
+        vent = ctk.CTkToplevel(self.window)
+        vent.title("Mi Inventario Físico")
+        vent.geometry("500x500")
+        vent.attributes('-topmost', True)
+
+        ctk.CTkLabel(vent, font=("Aptos", 16, "bold"), text="Registrar Nuevo Libro Físico").pack(pady=(15, 5))
+
+        # Formulario de registro
+        frame_form = ctk.CTkFrame(vent, fg_color="transparent")
+        frame_form.pack(fill="x", padx=20, pady=5)
+
+        entry_titulo = ctk.CTkEntry(frame_form, placeholder_text="Título del libro", width=150)
+        entry_titulo.grid(row=0, column=0, padx=5, pady=5)
+        
+        entry_autor = ctk.CTkEntry(frame_form, placeholder_text="Autor", width=150)
+        entry_autor.grid(row=0, column=1, padx=5, pady=5)
+        
+        entry_isbn = ctk.CTkEntry(frame_form, placeholder_text="ISBN", width=100)
+        entry_isbn.grid(row=0, column=2, padx=5, pady=5)
+
+        # Lista de inventario
+        ctk.CTkLabel(vent, font=("Aptos", 16, "bold"), text="Mi Estantería").pack(pady=(15, 5))
+        
+        lista_inventario = tk.Listbox(vent, bg="#2b2b2b", fg="white", bd=0, highlightthickness=0, font=("Aptos", 12))
+        lista_inventario.pack(fill="both", expand=True, padx=20, pady=5)
+
+        def refrescar_lista():
+            lista_inventario.delete(0, tk.END)
+            libros = self.db.listar_libros()
+            if libros:
+                for l in libros:
+                    # Formato: ID | Titulo | Autor | Estado
+                    lista_inventario.insert(tk.END, f" ID: {l[0]} | {l[1]} - {l[2]} | Estado: {l[4]}")
+            else:
+                lista_inventario.insert(tk.END, " No hay libros registrados.")
+        
+        # NUEVA LÓGICA PARA DEVOLVER LIBRO FISICO
+        def accion_devolver():
+            seleccion = lista_inventario.curselection()
+            if not seleccion:
+                messagebox.showwarning("Atención", "Selecciona un libro de tu estantería primero.", parent=vent)
+                return
+            
+            texto_libro = lista_inventario.get(seleccion[0])
+            
+            # Verificar si realmente está prestado
+            if "disponible" in texto_libro.lower():
+                messagebox.showinfo("Info", "Este libro ya se encuentra disponible.", parent=vent)
+                return
+                
+            try:
+                # Extraer el ID del texto (ej. " ID: 1 | Titulo...")
+                id_libro = texto_libro.split("|")[0].replace("ID:", "").strip()
+                
+                # Actualizar base de datos
+                if self.db.devolver_libro(id_libro):
+                    messagebox.showinfo("Éxito", "El libro ha sido devuelto a tu estantería.", parent=vent)
+                    refrescar_lista() # Actualiza la lista para mostrar "disponible"
+                else:
+                    messagebox.showerror("Error", "Hubo un problema al actualizar la base de datos.", parent=vent)
+            except Exception as e:
+                pass
+
+        # Botón debajo de la lista
+        ctk.CTkButton(vent, 
+                      text="Marcar como Devuelto", 
+                      font=("Aptos", 14),
+                      fg_color="#b58d00", hover_color="#8a6b00", # Color mostaza para diferenciar
+                      command=accion_devolver).pack(pady=(0, 15))
+
+        def accion_registrar():
+            t, a, i = entry_titulo.get(), entry_autor.get(), entry_isbn.get()
+            if t and a and i:
+                self.db.registrar_libro(t, a, i)
+                entry_titulo.delete(0, tk.END)
+                entry_autor.delete(0, tk.END)
+                entry_isbn.delete(0, tk.END)
+                refrescar_lista()
+                messagebox.showinfo("Éxito", "Libro registrado correctamente", parent=vent)
+            else:
+                messagebox.showwarning("Atención", "Llena todos los campos", parent=vent)
+
+        ctk.CTkButton(frame_form, text="Registrar", command=accion_registrar).grid(row=1, column=0, columnspan=3, pady=10)
+        
+        refrescar_lista()
+
+    #Cambios para bilioteca física
+    def abrir_ventana_pedir_libro(self):
+        """
+        Se conecta al peer seleccionado, lista sus libros físicos y permite solicitar préstamo.
+        """
+        seleccion = self.lista_peers.curselection()
+        
+        if not seleccion:
+            messagebox.showwarning("Atención", "Por favor, selecciona un Peer de la lista de la derecha primero.")
+            return
+
+        item_texto = self.lista_peers.get(seleccion[0])
+        if "IP:" not in item_texto:
+            return
+
+        ip_seleccionada = item_texto.replace("IP:", "").strip()
+
+        # Ventana para mostrar los libros del vecino
+        vent = ctk.CTkToplevel(self.window)
+        vent.title(f"Libros de {ip_seleccionada}")
+        vent.geometry("550x400")
+        vent.attributes('-topmost', True)
+
+        ctk.CTkLabel(vent, font=("Aptos", 16, "bold"), text=f"Estantería de: {ip_seleccionada}").pack(pady=(15, 5))
+
+        lista_libros = tk.Listbox(vent, bg="#2b2b2b", fg="white", bd=0, highlightthickness=0, font=("Aptos", 12))
+        lista_libros.pack(fill="both", expand=True, padx=20, pady=10)
+
+        # Usar el stub para pedir la lista por red
+        stub = self.nodo.obtener_stub(ip_seleccionada)
+        respuesta = stub.listar_libros_fisicos()
+
+        if isinstance(respuesta, dict) and respuesta.get('tipo') == 'RESPUESTA_LIBROS':
+            libros_vecino = respuesta.get('libros', [])
+            for l in libros_vecino:
+                # Mostrar ID, Titulo y Estado
+                lista_libros.insert(tk.END, f"ID: {l[0]} | {l[1]} | Estado: {l[4]}")
+        else:
+            lista_libros.insert(tk.END, " Error al obtener el catálogo del peer.")
+
+        def accion_solicitar():
+            sel_libro = lista_libros.curselection()
+            if not sel_libro:
+                messagebox.showwarning("Atención", "Selecciona un libro de la lista.", parent=vent)
+                return
+            
+            # Extraer el ID del libro del texto seleccionado
+            texto_libro = lista_libros.get(sel_libro[0])
+            try:
+                id_libro = texto_libro.split("|")[0].replace("ID:", "").strip()
+            except:
+                return
+
+            # Iniciar petición
+            resp_prestamo = stub.solicitar_prestamo_fisico(id_libro)
+            
+            if isinstance(resp_prestamo, dict) and resp_prestamo.get('estado') == 'PROCESO_INICIADO':
+                # Pedir el token que el dueño debe dictarle/mostrarle
+                dialogo = ctk.CTkInputDialog(text="El dueño tiene un código de 6 letras en su consola.\nEscríbelo aquí para confirmar:", title="Validar Token")
+                token_ingresado = dialogo.get_input()
+
+                if token_ingresado:
+                    # Enviar token para confirmación. Usamos un nombre genérico o el ID del nodo local
+                    mi_nombre = f"Peer_{self.nodo.mi_id}" 
+                    resp_conf = stub.confirmar_entrega_fisica(id_libro, mi_nombre, token_ingresado.upper())
+                    
+                    if isinstance(resp_conf, dict) and resp_conf.get('estado') == 'OK':
+                        messagebox.showinfo("¡Éxito!", "Préstamo formalizado exitosamente. ¡Cuida el libro!", parent=vent)
+                        vent.destroy()
+                    else:
+                        error_msg = resp_conf.get('mensaje', 'Token incorrecto') if isinstance(resp_conf, dict) else 'Error de red'
+                        messagebox.showerror("Error", f"No se pudo completar: {error_msg}", parent=vent)
+            else:
+                messagebox.showerror("Error", "No se pudo iniciar el proceso con el Peer.", parent=vent)
+
+        ctk.CTkButton(vent, text="Solicitar Préstamo", font=("Aptos", 14), command=accion_solicitar).pack(pady=15)
 
     def iniciar(self):
         """

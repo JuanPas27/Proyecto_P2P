@@ -1,5 +1,8 @@
 import hashlib
 import time
+#Biblioteca física
+import uuid
+from database import GestorBiblioteca
 
 # Clases
 from marshalling import Marshalling
@@ -17,6 +20,10 @@ class PeerSkeleton:
             'NUEVO_ARCHIVO': self._manejar_nuevo_archivo,
             'NUEVO_PEER': self._manejar_nuevo_peer,
             'SOLICITUD_PEERS': self._manejar_solicitud_peers,
+            #Biblioteca física
+            'LISTAR_LIBROS': self._manejar_listar_libros,
+            'SOLICITAR_PRESTAMO': self._manejar_solicitar_prestamo,
+            'CONFIRMAR_ENTREGA': self._manejar_confirmar_entrega,
         }
     
     def procesar_solicitud_tcp(self, datos, addr):
@@ -147,3 +154,36 @@ class PeerSkeleton:
             'peers': list(self.peer.peers_conocidos.keys()),
             'token': self.peer.auth_token
         }
+    
+    def _manejar_listar_libros(self, mensaje, addr):
+        libros = self.db.listar_libros()
+        return {
+            'tipo': 'RESPUESTA_LIBROS',
+            'libros': libros
+        }
+
+    def _manejar_solicitar_prestamo(self, mensaje, addr):
+        id_libro = mensaje['id_libro']
+        token = str(uuid.uuid4())[:6].upper()
+        
+        self.db.guardar_token_temporal(id_libro, token)
+        
+        print(f"\n[!] ALGUIEN QUIERE UN LIBRO")
+        print(f"   TOKEN DE TRANSFERENCIA: {token}")
+        print("   Muéstralo al receptor para validar")
+        
+        return {
+            'tipo': 'RESPUESTA_PRESTAMO',
+            'estado': 'PROCESO_INICIADO',
+            'mensaje': 'El dueño tiene el código'
+        }
+
+    def _manejar_confirmar_entrega(self, mensaje, addr):
+        id_libro = mensaje['id_libro']
+        usuario = mensaje['usuario']
+        token_cliente = mensaje['token_cliente']
+        
+        if self.db.validar_y_finalizar(id_libro, usuario, token_cliente):
+            return {'tipo': 'RESPUESTA_CONFIRMACION', 'estado': 'OK', 'mensaje': 'Prestamo formalizado'}
+        else:
+            return {'tipo': 'RESPUESTA_CONFIRMACION', 'estado': 'ERROR', 'mensaje': 'Token incorrecto'}
