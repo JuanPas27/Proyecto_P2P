@@ -11,7 +11,6 @@ from database import GestorBiblioteca
 ctk.set_appearance_mode("dark")  # Modo oscuro por defecto
 ctk.set_default_color_theme("blue")  # Color de acento (botones azules)
 
-
 class BibliotecaGUI:
     def __init__(self):
         self.nodo = peer.P2P_Peer()  # Inicializar nodo P2P en segundo plano
@@ -574,7 +573,6 @@ class BibliotecaGUI:
         """
         self.window.mainloop()
 
-
 def main():
     app = BibliotecaGUI()
     #login de usuario
@@ -594,7 +592,7 @@ def main():
 
     def intentar_login():
         u, p = entry_user.get(), entry_pass.get()
-        calif = db.validar_usuario(u, p)
+        calif = app.db.validar_usuario(u, p)
         if calif is not None:
             usuario_logueado["nombre"] = u
             usuario_logueado["calificacion"] = calif
@@ -605,7 +603,7 @@ def main():
     def intentar_registro():
         u, p = entry_user.get(), entry_pass.get()
         if u and p:
-            if db.registrar_usuario(u, p):
+            if app.db.registrar_usuario(u, p):
                 messagebox.showinfo("Éxito", "Registrado. Ahora inicia sesión.")
             else:
                 messagebox.showerror("Error", "El usuario ya existe")

@@ -25,7 +25,8 @@ class PeerSkeleton:
             'SOLICITAR_PRESTAMO': self._manejar_solicitar_prestamo,
             'CONFIRMAR_ENTREGA': self._manejar_confirmar_entrega,
             #Calificar al peer
-            'ENVIAR_CALIFICACION': self._manejar_nueva_calificacion,        }
+            'ENVIAR_CALIFICACION': self._manejar_nueva_calificacion,
+        }
     
     def procesar_solicitud_tcp(self, datos, addr):
         mensaje = Marshalling.unmarshal(datos)
