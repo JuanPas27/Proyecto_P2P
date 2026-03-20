@@ -11,7 +11,6 @@ from database import GestorBiblioteca
 ctk.set_appearance_mode("dark")  # Modo oscuro por defecto
 ctk.set_default_color_theme("blue")  # Color de acento (botones azules)
 
-
 class BibliotecaGUI:
     def __init__(self):
         self.nodo = peer.P2P_Peer()  # Inicializar nodo P2P en segundo plano
@@ -301,102 +300,6 @@ class BibliotecaGUI:
         except FileNotFoundError:
             lista_descargas.insert(tk.END, " Carpeta de descargas no encontrada.")
 
-    '''def abrir_ventana_descarga(self):
-        """
-        Abre la ventana donde se van a descargar los archivos.
-        La ventana se abre una vez que se haya seleccionado con el mouse el archivo a descargar.
-        De la selección se obtiene el titulo y la ip.
-        """
-        seleccion = self.lista_resultados.curselection()  # Metodo de selección con el mouse
-
-        # Valida la seleccion
-        if not seleccion:
-            messagebox.showwarning("Atención", "Por favor, selecciona un archivo de la lista de resultados primero.")
-            return
-
-        # Extrae el texto del elemento seleccionado
-        item_texto = self.lista_resultados.get(seleccion[0])
-
-        # Valida que no haya seleccionado los mensajes de "Buscando..." o "No se encontraron..."
-        if "IP:" not in item_texto:
-            messagebox.showwarning("Atención", "Selección no válida.")
-            return
-
-        # Separa el texto para sacar el título y la IP
-        try:
-            # El texto tiene el formato: " titulo.pdf  |  2.5 MB  |  IP: 192.168.1.5"
-            partes = item_texto.split("  |  ")
-            titulo_seleccionado = partes[0].strip()  # elimina espacios extra
-            ip_seleccionada = partes[2].replace("IP:", "").strip()
-        except Exception as e:
-            messagebox.showerror("Error", "No se pudo leer la información del archivo.")
-            return
-
-        # crea la ventana de progreso de descarga
-        vent = ctk.CTkToplevel(self.window)
-        vent.title("Descargando...")
-        vent.geometry("400x200")
-        vent.attributes('-topmost', True)
-
-        ctk.CTkLabel(vent,
-                     font=("Aptos", 14, "bold"),
-                     text=f"Descargando: {titulo_seleccionado}").pack(pady=(20, 5))
-        ctk.CTkLabel(vent, font=("Aptos", 12),
-                     text=f"Desde: {ip_seleccionada}").pack(pady=(0, 15))
-
-        progreso = ctk.CTkProgressBar(vent,
-                                      orientation="horizontal",
-                                      mode="determinate",
-                                      width=300)
-        progreso.pack(pady=10)
-        progreso.set(0)  # inicia animacion de descarga en 0
-
-        lbl_estado = ctk.CTkLabel(vent,
-                                  text="Conectando... 0%",
-                                  font=("Aptos", 12),
-                                  text_color="#52a8ff")
-        lbl_estado.pack(pady=5)
-
-        def actualizar_barra(porcentaje):
-            """
-            Actualiza la barra de porcentaje en tiempo real
-            """
-            # CustomTkinter usa valores de 0.0 a 1.0 para la barra
-            valor_barra = porcentaje / 100.0
-
-            # Usamos after(0, ...) para actualizar la GUI de forma segura desde otro hilo
-            self.window.after(0, lambda: [progreso.set(valor_barra),
-                                          lbl_estado.configure(text=f"Descargando... {porcentaje:.1f}%")])
-
-        def hilo_descarga():
-            """
-            Ejecuta la descarga en segundo plano
-            """
-            try:
-                # se retorna el progreso al backend
-                self.nodo.descargar(titulo_seleccionado, ip_seleccionada, callback_progress=actualizar_barra)
-                self.window.after(0, lambda: finalizar_descarga("¡Descarga Completada!", "#69ff6e"))
-            except Exception as e:
-                self.window.after(0, lambda: finalizar_descarga(f"Error: {e}", "#ff5252"))
-
-        def finalizar_descarga(mensaje, color):
-            """
-            Termina ejecucion de descarga y se llena la barra de progreso
-            """
-            progreso.set(1)  # llenado de la barra
-            lbl_estado.configure(text=mensaje, text_color=color)
-
-            # botón para cerrar ventanita cuando termine
-            ctk.CTkButton(vent,
-                          text="Cerrar",
-                          font=("Aptos", 12),
-                          corner_radius=20,
-                          width=100,
-                          command=vent.destroy).pack(pady=10)
-
-        # Inicia el hilo de descarga automáticamente sin esperar un clic extra
-        threading.Thread(target=hilo_descarga, daemon=True).start()'''
-
     def abrir_ventana_descarga(self):
         """
         Abre la ventana donde se van a descargar los archivos.
@@ -535,29 +438,33 @@ class BibliotecaGUI:
         # NUEVA LÓGICA PARA DEVOLVER LIBRO FISICO
         def accion_devolver():
             seleccion = lista_inventario.curselection()
-            if not seleccion:
-                messagebox.showwarning("Atención", "Selecciona un libro de tu estantería primero.", parent=vent)
-                return
-            
+            if not seleccion: return
             texto_libro = lista_inventario.get(seleccion[0])
+            if "disponible" in texto_libro.lower(): return
+                
+            id_libro = texto_libro.split("|")[0].replace("ID:", "").strip()
             
-            # Verificar si realmente está prestado
-            if "disponible" in texto_libro.lower():
-                messagebox.showinfo("Info", "Este libro ya se encuentra disponible.", parent=vent)
-                return
+            # 1. Recuperar en la DB quién tenía el libro antes de devolverlo
+            self.db.cursor.execute("SELECT poseedor_actual FROM libros WHERE id=?", (id_libro,))
+            poseedor = self.db.cursor.fetchone()[0]
+
+            if self.db.devolver_libro(id_libro):
+                refrescar_lista()
                 
-            try:
-                # Extraer el ID del texto (ej. " ID: 1 | Titulo...")
-                id_libro = texto_libro.split("|")[0].replace("ID:", "").strip()
+                # 2. Pedir calificación (Uber style)
+                dialogo = ctk.CTkInputDialog(text=f"El libro fue devuelto por '{poseedor}'.\nDel 1 al 5, ¿cuántas estrellas le das?", title="Calificar Usuario")
+                estrellas = dialogo.get_input()
                 
-                # Actualizar base de datos
-                if self.db.devolver_libro(id_libro):
-                    messagebox.showinfo("Éxito", "El libro ha sido devuelto a tu estantería.", parent=vent)
-                    refrescar_lista() # Actualiza la lista para mostrar "disponible"
+                if estrellas and estrellas.isdigit() and 1 <= int(estrellas) <= 5:
+                    messagebox.showinfo("Éxito", "Gracias por calificar. El libro vuelve a estar disponible.", parent=vent)
+                    
+                    # 3. Buscar la IP de ese peer en nuestra lista y enviarle la calificación
+                    for ip in self.nodo.peers_conocidos.keys():
+                        stub = self.nodo.obtener_stub(ip)
+                        # Le disparamos la calificacion a la red. Si el peer sigue conectado, la recibe.
+                        threading.Thread(target=stub.enviar_calificacion_red, args=(int(estrellas),)).start()
                 else:
-                    messagebox.showerror("Error", "Hubo un problema al actualizar la base de datos.", parent=vent)
-            except Exception as e:
-                pass
+                    messagebox.showwarning("Aviso", "Libro devuelto, pero no se envió calificación.", parent=vent)
 
         # Botón debajo de la lista
         ctk.CTkButton(vent, 
@@ -665,9 +572,55 @@ class BibliotecaGUI:
         """
         self.window.mainloop()
 
-
 def main():
     app = BibliotecaGUI()
+    #login de usuario
+    usuario_logueado = {"nombre": "", "calificacion": 5.0}
+
+    # --- VENTANA DE LOGIN ---
+    login_win = ctk.CTk()
+    login_win.title("Iniciar Sesión")
+    login_win.geometry("300x350")
+
+    ctk.CTkLabel(login_win, text="📚 Alejandría P2P", font=("Aptos", 20, "bold")).pack(pady=(20, 20))
+    
+    entry_user = ctk.CTkEntry(login_win, placeholder_text="Usuario")
+    entry_user.pack(pady=10)
+    entry_pass = ctk.CTkEntry(login_win, placeholder_text="Contraseña", show="*")
+    entry_pass.pack(pady=10)
+
+    def intentar_login():
+        u, p = entry_user.get(), entry_pass.get()
+        calif = app.db.validar_usuario(u, p)
+        if calif is not None:
+            usuario_logueado["nombre"] = u
+            usuario_logueado["calificacion"] = calif
+            login_win.destroy()
+        else:
+            messagebox.showerror("Error", "Credenciales incorrectas")
+
+    def intentar_registro():
+        u, p = entry_user.get(), entry_pass.get()
+        if u and p:
+            if app.db.registrar_usuario(u, p):
+                messagebox.showinfo("Éxito", "Registrado. Ahora inicia sesión.")
+            else:
+                messagebox.showerror("Error", "El usuario ya existe")
+
+    ctk.CTkButton(login_win, text="Iniciar Sesión", command=intentar_login).pack(pady=10)
+    ctk.CTkButton(login_win, text="Registrarse", fg_color="gray", command=intentar_registro).pack(pady=5)
+    
+    login_win.mainloop()
+
+    # Si cerró la ventana sin loguearse, detener el programa
+    if not usuario_logueado["nombre"]:
+        return
+
+    #INICIAR APP PRINCIPAL
+    app = BibliotecaGUI()
+    # Guardamos el usuario en el nodo para que la red sepa quién somos
+    app.nodo.mi_usuario = usuario_logueado["nombre"]
+    app.nodo.mi_calificacion = usuario_logueado["calificacion"]
     app.iniciar()
 
 

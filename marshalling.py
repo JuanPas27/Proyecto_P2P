@@ -25,6 +25,7 @@ class Marshalling:
         'RESPUESTA_PRESTAMO': 0x14,
         'CONFIRMAR_ENTREGA': 0x15,
         'RESPUESTA_CONFIRMACION': 0x16,
+        'ENVIAR_CALIFICACION': 0x17,
         'ERROR': 0xFF
 
     }
