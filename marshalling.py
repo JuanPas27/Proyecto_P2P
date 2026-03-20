@@ -18,7 +18,15 @@ class Marshalling:
         'NUEVO_PEER': 0x0A,
         'SOLICITUD_PEERS': 0x0B,
         'LISTA_PEERS': 0x0C,
+        #Biblioteca física
+        'LISTAR_LIBROS': 0x11,
+        'RESPUESTA_LIBROS': 0x12,
+        'SOLICITAR_PRESTAMO': 0x13,
+        'RESPUESTA_PRESTAMO': 0x14,
+        'CONFIRMAR_ENTREGA': 0x15,
+        'RESPUESTA_CONFIRMACION': 0x16,
         'ERROR': 0xFF
+
     }
     
     CODIGOS_TIPO = {v: k for k, v in TIPOS_MENSAJE.items()}
