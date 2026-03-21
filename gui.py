@@ -543,7 +543,12 @@ class BibliotecaGUI:
                 return
 
             # Iniciar petición enviando nuestros datos de reputación
-            resp_prestamo = stub.solicitar_prestamo_fisico(id_libro, self.nodo.mi_usuario, self.nodo.mi_calificacion)
+            resp_prestamo = stub.solicitar_prestamo_fisico(
+                id_libro, 
+                self.nodo.mi_usuario, 
+                self.nodo.mi_calificacion,
+                self.nodo.mi_total_calif
+            )
             
             if isinstance(resp_prestamo, dict) and resp_prestamo.get('estado') == 'PROCESO_INICIADO':
                 # Pedir el token que el dueño debe dictarle/mostrarle
@@ -571,18 +576,19 @@ class BibliotecaGUI:
         Abre la ventana principal
         """
         self.window.mainloop()
-
 def main():
+    # Inicializamos la app (y la base de datos) una sola vez
     app = BibliotecaGUI()
-    #login de usuario
-    usuario_logueado = {"nombre": "", "calificacion": 5.0}
+    
+    # Login de usuario con el nuevo campo "total_calif"
+    usuario_logueado = {"nombre": "", "calificacion": 5.0, "total_calif": 1}
 
     # --- VENTANA DE LOGIN ---
     login_win = ctk.CTk()
     login_win.title("Iniciar Sesión")
     login_win.geometry("300x350")
 
-    ctk.CTkLabel(login_win, text="📚 Alejandría P2P", font=("Aptos", 20, "bold")).pack(pady=(20, 20))
+    ctk.CTkLabel(login_win, text="📚 CINVESTAV PRESTAMO DE LIBROS", font=("Aptos", 20, "bold")).pack(pady=(20, 20))
     
     entry_user = ctk.CTkEntry(login_win, placeholder_text="Usuario")
     entry_user.pack(pady=10)
@@ -591,10 +597,14 @@ def main():
 
     def intentar_login():
         u, p = entry_user.get(), entry_pass.get()
-        calif = app.db.validar_usuario(u, p)
-        if calif is not None:
+        
+        # Como actualizamos database.py, ahora esto nos devuelve una tupla: (calificacion, total)
+        datos_usuario = app.db.validar_usuario(u, p)
+        
+        if datos_usuario:
             usuario_logueado["nombre"] = u
-            usuario_logueado["calificacion"] = calif
+            usuario_logueado["calificacion"] = datos_usuario[0]
+            usuario_logueado["total_calif"] = datos_usuario[1]
             login_win.destroy()
         else:
             messagebox.showerror("Error", "Credenciales incorrectas")
@@ -612,17 +622,19 @@ def main():
     
     login_win.mainloop()
 
-    # Si cerró la ventana sin loguearse, detener el programa
+    # Si cerró la ventana de login en la "X" sin loguearse, detener el programa
     if not usuario_logueado["nombre"]:
+        app.nodo.corriendo = False # Detenemos el nodo que se arrancó en el background
         return
 
-    #INICIAR APP PRINCIPAL
-    app = BibliotecaGUI()
-    # Guardamos el usuario en el nodo para que la red sepa quién somos
+    # --- INICIAR APP PRINCIPAL ---
+    
+    # Guardamos los 3 datos del usuario en el nodo para que la red sepa quién somos
     app.nodo.mi_usuario = usuario_logueado["nombre"]
     app.nodo.mi_calificacion = usuario_logueado["calificacion"]
+    app.nodo.mi_total_calif = usuario_logueado["total_calif"]
+    
     app.iniciar()
-
 
 if __name__ == "__main__":
     main()

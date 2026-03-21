@@ -66,10 +66,9 @@ class GestorBiblioteca:
             return False # El usuario ya existe
 
     def validar_usuario(self, nombre, password):
-        """Devuelve la calificación si el login es correcto, None si falla"""
-        self.cursor.execute("SELECT calificacion FROM usuarios WHERE nombre = ? AND password = ?", (nombre, password))
-        resultado = self.cursor.fetchone()
-        return resultado[0] if resultado else None
+        """Devuelve (calificacion, total_calificaciones) si el login es correcto, None si falla"""
+        self.cursor.execute("SELECT calificacion, total_calificaciones FROM usuarios WHERE nombre = ? AND password = ?", (nombre, password))
+        return self.cursor.fetchone() # Ahora retorna una tupla, ej: (5.0, 1)
 
     def actualizar_mi_calificacion(self, nombre, nuevas_estrellas):
         """Recalcula el promedio matemáticamente cuando alguien nos califica"""
