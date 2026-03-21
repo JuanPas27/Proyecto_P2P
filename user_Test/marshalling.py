@@ -156,7 +156,7 @@ class Marshalling:
         
         else:
             # Fallback a JSON para tipos no implementados
-            return json.dumps({'tipo': tipo, **kwargs}).encode()
+            return json.dumps({'tipo': codigo, **kwargs}).encode()
     
     @staticmethod
     def unmarshal(data):
