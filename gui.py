@@ -12,13 +12,13 @@ ctk.set_appearance_mode("dark")  # Modo oscuro por defecto
 ctk.set_default_color_theme("blue")  # Color de acento (botones azules)
 
 class BibliotecaGUI:
-    def __init__(self):
+    def __init__(self, root_window):
         self.nodo = peer.P2P_Peer()  # Inicializar nodo P2P en segundo plano
         self.db = GestorBiblioteca() 
 
         # ventana principal con CustomTkinter
-        self.window = ctk.CTk()
-        self.window.title("Alejandria")
+        self.window = root_window
+        self.window.title("Cinvestav P2P - Biblioteca Compartida")
         self.window.geometry("850x600")
 
         # Configurar grid para que sea responsivo al maximizar
@@ -577,18 +577,20 @@ class BibliotecaGUI:
         """
         self.window.mainloop()
 def main():
-    # Inicializamos la app (y la base de datos) una sola vez
-    app = BibliotecaGUI()
-    
-    # Login de usuario con el nuevo campo "total_calif"
+    db = GestorBiblioteca()
     usuario_logueado = {"nombre": "", "calificacion": 5.0, "total_calif": 1}
 
-    # --- VENTANA DE LOGIN ---
-    login_win = ctk.CTk()
+    # 1. CREAMOS LA ÚNICA VENTANA RAÍZ Y LA OCULTAMOS INMEDIATAMENTE
+    root = ctk.CTk()
+    root.withdraw()
+
+    # 2. CREAMOS EL LOGIN COMO VENTANA SECUNDARIA (Toplevel) SOBRE LA RAÍZ
+    login_win = ctk.CTkToplevel(root)
     login_win.title("Iniciar Sesión")
     login_win.geometry("300x350")
+    login_win.attributes('-topmost', True) # Asegura que salga al frente
 
-    ctk.CTkLabel(login_win, text="📚 CINVESTAV PRESTAMO DE LIBROS", font=("Aptos", 20, "bold")).pack(pady=(20, 20))
+    ctk.CTkLabel(login_win, text="📚 CINVESTAV PRESTAMO", font=("Aptos", 20, "bold")).pack(pady=(20, 20))
     
     entry_user = ctk.CTkEntry(login_win, placeholder_text="Usuario")
     entry_user.pack(pady=10)
@@ -597,44 +599,46 @@ def main():
 
     def intentar_login():
         u, p = entry_user.get(), entry_pass.get()
-        
-        # Como actualizamos database.py, ahora esto nos devuelve una tupla: (calificacion, total)
-        datos_usuario = app.db.validar_usuario(u, p)
+        datos_usuario = db.validar_usuario(u, p)
         
         if datos_usuario:
             usuario_logueado["nombre"] = u
             usuario_logueado["calificacion"] = datos_usuario[0]
             usuario_logueado["total_calif"] = datos_usuario[1]
+          
+            # Destruimos la ventana secundaria. Esto destraba el wait_window de abajo.
             login_win.destroy()
         else:
-            messagebox.showerror("Error", "Credenciales incorrectas")
+            messagebox.showerror("Error", "Credenciales incorrectas", parent=login_win)
 
     def intentar_registro():
         u, p = entry_user.get(), entry_pass.get()
         if u and p:
-            if app.db.registrar_usuario(u, p):
-                messagebox.showinfo("Éxito", "Registrado. Ahora inicia sesión.")
+            if db.registrar_usuario(u, p):
+                messagebox.showinfo("Éxito", "Registrado. Ahora inicia sesión.", parent=login_win)
             else:
-                messagebox.showerror("Error", "El usuario ya existe")
+                messagebox.showerror("Error", "El usuario ya existe", parent=login_win)
 
     ctk.CTkButton(login_win, text="Iniciar Sesión", command=intentar_login).pack(pady=10)
     ctk.CTkButton(login_win, text="Registrarse", fg_color="gray", command=intentar_registro).pack(pady=5)
     
-    login_win.mainloop()
+    # 3. MAGIA: Pausamos la ejecución aquí hasta que login_win sea destruida
+    root.wait_window(login_win)
 
-    # Si cerró la ventana de login en la "X" sin loguearse, detener el programa
+    # 4. Verificamos si se cerró la ventana sin loguearse
     if not usuario_logueado["nombre"]:
-        app.nodo.corriendo = False # Detenemos el nodo que se arrancó en el background
-        return
-
-    # --- INICIAR APP PRINCIPAL ---
+        root.destroy()
+        return 
     
-    # Guardamos los 3 datos del usuario en el nodo para que la red sepa quién somos
+    # 5. SI EL LOGIN FUE EXITOSO, HACEMOS VISIBLE LA RAÍZ Y CARGAMOS LA APP
+    root.deiconify() 
+    
+    app = BibliotecaGUI(root) # Le pasamos nuestra única ventana raíz
     app.nodo.mi_usuario = usuario_logueado["nombre"]
     app.nodo.mi_calificacion = usuario_logueado["calificacion"]
     app.nodo.mi_total_calif = usuario_logueado["total_calif"]
     
-    app.iniciar()
+    app.iniciar() # Esto arrancará el root.mainloop() desde adentro de tu clase
 
 if __name__ == "__main__":
     main()
