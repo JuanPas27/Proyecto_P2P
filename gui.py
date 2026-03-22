@@ -413,13 +413,13 @@ class BibliotecaGUI:
         frame_form.pack(fill="x", padx=20, pady=5)
 
         entry_titulo = ctk.CTkEntry(frame_form, placeholder_text="Título del libro", width=150)
-        entry_titulo.grid(row=0, column=0, padx=5, pady=5)
+        entry_titulo.grid(row=0, column=0, padx=5, pady=5, sticky="ew")
         
         entry_autor = ctk.CTkEntry(frame_form, placeholder_text="Autor", width=150)
-        entry_autor.grid(row=0, column=1, padx=5, pady=5)
+        entry_autor.grid(row=0, column=1, padx=5, pady=5, sticky="ew")
         
         entry_isbn = ctk.CTkEntry(frame_form, placeholder_text="ISBN", width=100)
-        entry_isbn.grid(row=0, column=2, padx=5, pady=5)
+        entry_isbn.grid(row=0, column=2, padx=5, pady=5, sticky="ew")
 
         # Lista de inventario
         ctk.CTkLabel(vent, font=("Aptos", 16, "bold"), text="Mi Estantería").pack(pady=(15, 5))
