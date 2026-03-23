@@ -356,16 +356,22 @@ class BibliotecaGUI:
                                 text_color="#52a8ff")
         lbl_estado.pack(pady=5)
 
+        reanudar = [False]
+        def notificar_reanudacion():
+            """Cambia el estado visual a 'Reanudando'"""
+            reanudar[0] = True
+            self.window.after(0, lambda: lbl_estado.configure(text="Reanudando descarga previa..."))
+
         def actualizar_barra(porcentaje):
             """
             Actualiza la barra de porcentaje en tiempo real
             """
             # CustomTkinter usa valores de 0.0 a 1.0 para la barra
             valor_barra = porcentaje / 100.0
-
+            texto_accion = "Reanudando..." if reanudar[0] else "Descargando..."
             # Usamos after(0, ...) para actualizar la GUI de forma segura desde otro hilo
             self.window.after(0, lambda: [progreso.set(valor_barra),
-                                        lbl_estado.configure(text=f"Descargando... {porcentaje:.1f}%")])
+                                        lbl_estado.configure(text=f"{texto_accion} {porcentaje:.1f}%")])
 
         def hilo_descarga():
             """
@@ -373,7 +379,9 @@ class BibliotecaGUI:
             """
             try:
                 # Llamada al método multifuente del nodo P2P
-                self.nodo.descargar_multifuente(titulo_seleccionado, callback_progress=actualizar_barra)
+                self.nodo.descargar_multifuente(titulo_seleccionado,
+                                                callback_progress=actualizar_barra,
+                                                callback_reanudar=notificar_reanudacion)
                 # En caso de encontrar registro de descarga previa, continua desde donde la dejo anteriormente
                 self.window.after(0, lambda: finalizar_descarga("¡Descarga Completada!", "#69ff6e"))
             except Exception as e:

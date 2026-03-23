@@ -575,7 +575,7 @@ class P2P_Peer:
             if sock:
                 sock.close()
     
-    def descargar_multifuente(self, nombre_archivo, callback_progress=None):
+    def descargar_multifuente(self, nombre_archivo, callback_progress=None, callback_reanudar=None):
         """
         Descarga un archivo desde múltiples peers simultáneamente.
             Dividir en piezas de 256 KB.
@@ -637,13 +637,11 @@ class P2P_Peer:
                 pieces_done = [False] * num_pieces
                 completed = 0
             """
-            time.sleep(1)
-            print(f"Archivo parcial encontrado ({completed}/{num_pieces} piezas")
-            # Sobrescribir eliminanando archivos y empezar de cero
-            ruta.unlink()
-            meta_ruta.unlink()
-            pieces_done = [False] * num_pieces
-            completed = 0
+            print(f"Archivo parcial encontrado. Reanudando ({completed}/{num_pieces} piezas)...")
+            if callback_reanudar:
+                callback_reanudar()
+            if callback_progress:
+                callback_progress((completed / num_pieces) * 100)
         elif not ruta.exists():
             # Crear archivo vacío del tamaño correcto
             with open(ruta, 'wb') as f:
