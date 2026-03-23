@@ -628,15 +628,6 @@ class P2P_Peer:
 
         # Si el archivo existe pero está incompleto, preguntar por reanudacion
         if ruta.exists() and not all(pieces_done):
-            """
-            op = input(f"Archivo parcial encontrado ({completed}/{num_pieces} piezas). ¿Reanudar? (s/n): ").strip().lower()
-            if op != 's':
-                # Sobrescribir eliminanando archivos y empezar de cero
-                ruta.unlink()
-                meta_ruta.unlink()
-                pieces_done = [False] * num_pieces
-                completed = 0
-            """
             print(f"Archivo parcial encontrado. Reanudando ({completed}/{num_pieces} piezas)...")
             if callback_reanudar:
                 callback_reanudar()
