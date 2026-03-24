@@ -14,7 +14,10 @@ ctk.set_default_color_theme("blue")  # Color de acento (botones azules)
 class BibliotecaGUI:
     def __init__(self, root_window):
         self.nodo = peer.P2P_Peer()  # Inicializar nodo P2P en segundo plano
-        self.db = GestorBiblioteca() 
+        self.db = GestorBiblioteca()
+
+        # 5. SI EL LOGIN FUE EXITOSO, HACEMOS VISIBLE LA RAÍZ Y CARGAMOS LA APP
+        root_window.deiconify()
 
         # ventana principal con CustomTkinter
         self.window = root_window
@@ -576,6 +579,7 @@ class BibliotecaGUI:
         Abre la ventana principal
         """
         self.window.mainloop()
+
 def main():
     db = GestorBiblioteca()
     usuario_logueado = {"nombre": "", "calificacion": 5.0, "total_calif": 1}
@@ -628,10 +632,7 @@ def main():
     # 4. Verificamos si se cerró la ventana sin loguearse
     if not usuario_logueado["nombre"]:
         root.destroy()
-        return 
-    
-    # 5. SI EL LOGIN FUE EXITOSO, HACEMOS VISIBLE LA RAÍZ Y CARGAMOS LA APP
-    root.deiconify() 
+        return
     
     app = BibliotecaGUI(root) # Le pasamos nuestra única ventana raíz
     app.nodo.mi_usuario = usuario_logueado["nombre"]
