@@ -29,13 +29,13 @@ class BibliotecaGUI:
         self.widgets()
         
         # Sustituir deiconify para windows
-        #self.window.state('normal')  # Restaurar la ventana minimizada
-        #self.window.lift()           # Traer la ventana al frente
-        #self.window.focus_force()    # Poner en el foco
-        #self.window.update()         # Forzar actualización
+        self.window.state('normal')  # Restaurar la ventana minimizada
+        self.window.lift()           # Traer la ventana al frente
+        self.window.focus_force()    # Poner en el foco
+        self.window.update()         # Forzar actualización
         
-        # o usar deiconify() con un delay (probar)
-        self.window.after(100, self.window.deiconify)
+        # o usar deiconify() con un delay
+        #self.window.after(100, self.window.deiconify)
 
         self.update_peers()  # Iniciar bucle para refrescar peers
 
