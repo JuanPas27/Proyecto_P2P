@@ -16,9 +16,6 @@ class BibliotecaGUI:
         self.nodo = peer.P2P_Peer()  # Inicializar nodo P2P en segundo plano
         self.db = GestorBiblioteca()
 
-        # 5. SI EL LOGIN FUE EXITOSO, HACEMOS VISIBLE LA RAÍZ Y CARGAMOS LA APP
-        root_window.deiconify()
-
         # ventana principal con CustomTkinter
         self.window = root_window
         self.window.title("Cinvestav P2P - Biblioteca Compartida")
@@ -30,6 +27,16 @@ class BibliotecaGUI:
         self.window.rowconfigure(1, weight=1)  # La fila de las listas se expande verticalmente
 
         self.widgets()
+        
+        # Sustituir deiconify para windows
+        #self.window.state('normal')  # Restaurar la ventana minimizada
+        #self.window.lift()           # Traer la ventana al frente
+        #self.window.focus_force()    # Poner en el foco
+        #self.window.update()         # Forzar actualización
+        
+        # o usar deiconify() con un delay (probar)
+        self.window.after(100, self.window.deiconify)
+
         self.update_peers()  # Iniciar bucle para refrescar peers
 
     def widgets(self):
