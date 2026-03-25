@@ -56,12 +56,13 @@ class PeerStub:
         except Exception as e:
             return {'tipo': 'ERROR', 'mensaje': str(e)}
 
-    def solicitar_prestamo_fisico(self, id_libro, mi_usuario, mi_calificacion):
+    def solicitar_prestamo_fisico(self, id_libro, mi_usuario, mi_calificacion, mi_total_calif):
         try:
             mensaje = Marshalling.marshal('SOLICITUD_PRESTAMO', 
                                         id_libro=id_libro, 
                                         usuario=mi_usuario,
                                         calificacion=mi_calificacion,
+                                        total_calif=mi_total_calif,
                                         token=self.auth_token)
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
                 sock.settimeout(self.timeout)

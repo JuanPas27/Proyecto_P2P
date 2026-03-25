@@ -166,13 +166,18 @@ class PeerSkeleton:
 
     def _manejar_solicitar_prestamo(self, mensaje, addr):
         id_libro = mensaje['id_libro']
-        token = str(uuid.uuid4())[:6].upper()
+        usuario_req = mensaje.get('usuario', 'Desconocido')
+        calif_req = mensaje.get('calificacion', 5.0)
+        total_req = mensaje.get('total_calif', 1)
         
+        token = str(uuid.uuid4())[:6].upper()
         self.db.guardar_token_temporal(id_libro, token)
         
-        print(f"\n[!] ALGUIEN QUIERE UN LIBRO")
-        print(f"   TOKEN DE TRANSFERENCIA: {token}")
-        print("   Muéstralo al receptor para validar")
+        print(f"\n[!] ALGUIEN QUIERE UN LIBRO FÍSICO")
+        print(f"   👤 Usuario: {usuario_req}")
+        print(f"   ⭐ Reputación: {calif_req}/5.0 (Basado en {total_req} préstamos)")
+        print(f"   🔑 TOKEN DE TRANSFERENCIA: {token}")
+        print("   Si confías en su reputación, muéstrale el token para validar.")
         
         return {
             'tipo': 'RESPUESTA_PRESTAMO',

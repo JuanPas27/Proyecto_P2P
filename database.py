@@ -27,11 +27,14 @@ class GestorBiblioteca:
         self.conn.commit()
         
         # TABLA DE REPUTACIÓN
+        # eliminado porque se duplicaba el campo nombre para los usuarios
+        """
         self.cursor.execute('''CREATE TABLE IF NOT EXISTS usuarios (
                 nombre TEXT PRIMARY KEY,
                 puntos INTEGER DEFAULT 100
             )
         ''')
+        """
         
         # TABLA DE TRAZABILIDAD (Log)
         self.cursor.execute('''CREATE TABLE IF NOT EXISTS historial (
@@ -47,7 +50,8 @@ class GestorBiblioteca:
                 nombre TEXT PRIMARY KEY,
                 password TEXT NOT NULL,
                 calificacion REAL DEFAULT 5.0,
-                total_calificaciones INTEGER DEFAULT 1
+                total_calificaciones INTEGER DEFAULT 1,
+                puntos INTEGER DEFAULT 100
             )
         ''')
         self.conn.commit()
@@ -62,10 +66,9 @@ class GestorBiblioteca:
             return False # El usuario ya existe
 
     def validar_usuario(self, nombre, password):
-        """Devuelve la calificación si el login es correcto, None si falla"""
-        self.cursor.execute("SELECT calificacion FROM usuarios WHERE nombre = ? AND password = ?", (nombre, password))
-        resultado = self.cursor.fetchone()
-        return resultado[0] if resultado else None
+        """Devuelve (calificacion, total_calificaciones) si el login es correcto, None si falla"""
+        self.cursor.execute("SELECT calificacion, total_calificaciones FROM usuarios WHERE nombre = ? AND password = ?", (nombre, password))
+        return self.cursor.fetchone() # Ahora retorna una tupla, ej: (5.0, 1)
 
     def actualizar_mi_calificacion(self, nombre, nuevas_estrellas):
         """Recalcula el promedio matemáticamente cuando alguien nos califica"""
@@ -103,7 +106,7 @@ class GestorBiblioteca:
         self.cursor.execute("UPDATE libros SET estado = 'prestado', poseedor_actual = ? WHERE id = ?", (nombre_usuario, libro_id))
         self.cursor.execute("INSERT INTO historial (libro_id, receptor) VALUES (?, ?)", (libro_id, nombre_usuario))
         # Sumar puntos por ser un usuario activo
-        self.cursor.execute("INSERT OR IGNORE INTO usuarios (nombre) VALUES (?)", (nombre_usuario,))
+        # self.cursor.execute("INSERT OR IGNORE INTO usuarios (nombre) VALUES (?)", (nombre_usuario,))
         self.cursor.execute("UPDATE usuarios SET puntos = puntos + 5 WHERE nombre = ?", (nombre_usuario,))
         self.conn.commit()
 
