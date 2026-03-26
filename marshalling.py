@@ -37,26 +37,30 @@ class Marshalling:
         """Convierte mensaje a bytes según su tipo"""
         codigo = Marshalling.TIPOS_MENSAJE.get(tipo, 0xFF)
         
-        # DISCOVERY: ip + token
+        # DISCOVERY: ip + usuario + token
         if tipo == 'DISCOVERY':
             ip_bytes = kwargs['ip'].encode()
+            usuario_bytes = kwargs.get('usuario', 'Desconocido').encode()
             token_bytes = kwargs['token'].encode()
-            formato = f'!B B {len(ip_bytes)}s {len(token_bytes)}s'
-            return struct.pack(formato, codigo, len(ip_bytes), ip_bytes, token_bytes)
+            formato = f'!B B {len(ip_bytes)}s B {len(usuario_bytes)}s {len(token_bytes)}s'
+            return struct.pack(formato, codigo, len(ip_bytes), ip_bytes, len(usuario_bytes), usuario_bytes,
+                               token_bytes)
         
-        # DISCOVERY_RESPONSE: solo token
+        # DISCOVERY_RESPONSE: usuario + token
         elif tipo == 'DISCOVERY_RESPONSE':
+            usuario_bytes = kwargs.get('usuario', 'Desconocido').encode()
             token_bytes = kwargs['token'].encode()
-            formato = f'!B {len(token_bytes)}s'
-            return struct.pack(formato, codigo, token_bytes)
+            formato = f'!B B {len(usuario_bytes)}s {len(token_bytes)}s'
+            return struct.pack(formato, codigo, len(usuario_bytes), usuario_bytes, token_bytes)
         
-        # HEARTBEAT: ip + timestamp + token
+        # HEARTBEAT: ip + timestamp + usuario + token
         elif tipo == 'HEARTBEAT':
             ip_bytes = kwargs['ip'].encode()
+            usuario_bytes = kwargs.get('usuario', 'Desconocido').encode()
             token_bytes = kwargs['token'].encode()
-            formato = f'!B Q B {len(ip_bytes)}s {len(token_bytes)}s'
-            return struct.pack(formato, codigo, int(kwargs['timestamp']), 
-                             len(ip_bytes), ip_bytes, token_bytes)
+            formato = f'!B Q B {len(ip_bytes)}s B {len(usuario_bytes)}s {len(token_bytes)}s'
+            return struct.pack(formato, codigo, int(kwargs['timestamp']), len(ip_bytes), ip_bytes, len(usuario_bytes),
+                               usuario_bytes, token_bytes)
         
         # BUSCAR: query + token
         elif tipo == 'BUSCAR':
@@ -163,32 +167,40 @@ class Marshalling:
         """Reconstruir mensaje desde bytes"""
         if not data:
             return None
-        
+
         try:
             # código del mensaje (primer byte)
             codigo = data[0]
-            
+
             if codigo not in Marshalling.CODIGOS_TIPO:
                 # código desconocido con JSON
                 return json.loads(data.decode())
-            
+
             tipo = Marshalling.CODIGOS_TIPO[codigo]
             offset = 1 # evitar primer byte
-            
+
             # DISCOVERY
             if tipo == 'DISCOVERY':
                 ip_len = struct.unpack('!B', data[offset:offset+1])[0]
                 offset += 1
                 ip = data[offset:offset+ip_len].decode()
                 offset += ip_len
+                user_len = struct.unpack('!B', data[offset:offset+1])[0]
+                offset += 1
+                usuario = data[offset:offset+user_len].decode()
+                offset += user_len
                 token = data[offset:].decode()
-                return {'tipo': tipo, 'ip': ip, 'token': token}
-            
+                return {'tipo': tipo, 'ip': ip, 'usuario': usuario, 'token': token}
+
             # DISCOVERY_RESPONSE
             elif tipo == 'DISCOVERY_RESPONSE':
+                user_len = struct.unpack('!B', data[offset:offset+1])[0]
+                offset += 1
+                usuario = data[offset:offset+user_len].decode()
+                offset += user_len
                 token = data[offset:].decode()
-                return {'tipo': tipo, 'token': token}
-            
+                return {'tipo': tipo, 'usuario': usuario, 'token': token}
+
             # HEARTBEAT
             elif tipo == 'HEARTBEAT':
                 timestamp = struct.unpack('!Q', data[offset:offset+8])[0]
@@ -197,8 +209,12 @@ class Marshalling:
                 offset += 1
                 ip = data[offset:offset+ip_len].decode()
                 offset += ip_len
+                user_len = struct.unpack('!B', data[offset:offset+1])[0]
+                offset += 1
+                usuario = data[offset:offset+user_len].decode()
+                offset += user_len
                 token = data[offset:].decode()
-                return {'tipo': tipo, 'ip': ip, 'timestamp': timestamp, 'token': token}
+                return {'tipo': tipo, 'ip': ip, 'timestamp': timestamp, 'usuario': usuario, 'token': token}
             
             # BUSCAR
             elif tipo == 'BUSCAR':

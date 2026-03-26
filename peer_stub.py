@@ -49,6 +49,7 @@ class P2P_Peer:
         # Peers conocidos de la red completa, con estampas de tiempo de vida por peer
         self.peers_conocidos = {}  # ip -> timestamp ultimo heartbeat
         self.stubs = {}  # Caché de objetos stub para comunicación con cada peer
+        self.mi_usuario = "Desconocido"
         
         # Archivos conocidos en la red (nombre -> lista de (ip, peer_id))
         self.file_peers = {}
@@ -335,8 +336,8 @@ class P2P_Peer:
         ahora = time.time()
         inactivos = []
         
-        for ip, ultimo in list(self.peers_conocidos.items()):
-            if ahora - ultimo > 30:  # Si no hay heartbeat en los últimos 30s
+        for ip, info in list(self.peers_conocidos.items()):
+            if ahora - info['timestamp'] > 30:  # Si no hay heartbeat en los últimos 30s
                 inactivos.append(ip)
         
         for ip in inactivos:
@@ -359,6 +360,7 @@ class P2P_Peer:
                 mensaje = Marshalling.marshal('HEARTBEAT',
                                              ip=self.mi_ip,
                                              timestamp=time.time(),
+                                             usuario = self.mi_usuario,
                                              token=self.auth_token)
                 
                 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -417,6 +419,7 @@ class P2P_Peer:
             
             mensaje = Marshalling.marshal('DISCOVERY',
                                          ip=self.mi_ip,
+                                         usuario=self.mi_usuario,
                                          token=self.auth_token)
             
             sock.sendto(mensaje, ('255.255.255.255', self.puerto_discovery))
@@ -435,8 +438,9 @@ class P2P_Peer:
                         
                         if addr[0] not in peers_encontrados:
                             peers_encontrados.append(addr[0])
-                            print(f"Peer encontrado: {addr[0]}")
-                            self.peers_conocidos[addr[0]] = time.time()
+                            print(f"Peer encontrado: {respuesta.get('usuario', 'Desconocido')} ({addr[0]})")
+                            self.peers_conocidos[addr[0]] = {'timestamp': time.time(), 
+                                                             'usuario': respuesta.get('usuario', 'Desconocido')}
                 except socket.timeout:
                     continue
                 except:
@@ -477,7 +481,7 @@ class P2P_Peer:
                 nuevos = 0
                 for ip in respuesta["peers"]:
                     if ip != self.mi_ip and ip not in self.peers_conocidos:
-                        self.peers_conocidos[ip] = time.time()
+                        self.peers_conocidos[ip] = {'timestamp': time.time(), 'usuario': 'Desconocido'}
                         nuevos += 1
                 
                 if nuevos > 0:
@@ -826,10 +830,10 @@ class P2P_Peer:
                 print("\nPEERS:")
                 ahora = time.time()
                 if self.peers_conocidos:
-                    for ip, ultimo in sorted(self.peers_conocidos.items()):
-                        hace = ahora - ultimo
+                    for ip, info in sorted(self.peers_conocidos.items()):
+                        hace = ahora - info['timestamp']
                         estado = "🟢" if hace < 30 else "🟡" if hace < 60 else "🔴"
-                        print(f"   {estado} {ip} (hace {hace:.0f}s)")
+                        print(f"   {estado} {info['usuario']} - {ip} (hace {hace:.0f}s)")
                 else:
                     print("   No hay peers conocidos")
             elif op == "4":

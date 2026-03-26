@@ -70,22 +70,28 @@ class PeerSkeleton:
     
     def _manejar_discovery(self, mensaje, addr):
         if addr[0] != self.peer.mi_ip:
-            self.peer.peers_conocidos[addr[0]] = time.time()
+            self.peer.peers_conocidos[addr[0]] = {'timestamp': time.time(), 
+                                                  'usuario': mensaje.get('usuario', 'Desconocido')}
             return {
                 'tipo': 'DISCOVERY_RESPONSE',
+                'usuario': self.peer.mi_usuario,
                 'token': self.peer.auth_token
             }
         return None
     
     def _manejar_discovery_response(self, mensaje, addr):
         if addr[0] not in self.peer.peers_conocidos:
-            self.peer.peers_conocidos[addr[0]] = time.time()
-            print(f"\nNuevo peer descubierto: {addr[0]}")
+            usuario = mensaje.get('usuario', 'Desconocido')
+            self.peer.peers_conocidos[addr[0]] = {'timestamp': time.time(),
+                                                  'usuario': usuario}
+            print(f"\nNuevo peer descubierto: {usuario} ({addr[0]})")
         return None
     
     def _manejar_heartbeat(self, mensaje, addr):
         ip = mensaje.get('ip', addr[0])
-        self.peer.peers_conocidos[ip] = mensaje.get('timestamp', time.time())
+        usuario = mensaje.get('usuario', 'Desconocido')
+        self.peer.peers_conocidos[ip] = {'timestamp': mensaje.get('timestamp', time.time()), 
+                                         'usuario': usuario}
         return None
     
     def _manejar_busqueda(self, mensaje, addr):
@@ -146,7 +152,7 @@ class PeerSkeleton:
     def _manejar_nuevo_peer(self, mensaje, addr):
         nueva_ip = mensaje['ip']
         if nueva_ip != self.peer.mi_ip and nueva_ip not in self.peer.peers_conocidos:
-            self.peer.peers_conocidos[nueva_ip] = time.time()
+            self.peer.peers_conocidos[nueva_ip] = {'timestamp': time.time(), 'usuario': 'Desconocido'}
             print(f"\nNuevo peer añadido (propagado): {nueva_ip}")
         return None
     

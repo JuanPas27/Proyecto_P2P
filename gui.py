@@ -187,8 +187,9 @@ class BibliotecaGUI:
         self.lista_peers.delete(0, tk.END)
         peers = self.nodo.peers_conocidos
         if peers:
-            for ip, ultimo_pulso in peers.items():
-                self.lista_peers.insert(tk.END, f" IP: {ip}")
+            for ip, info in peers.items():
+                nombre = info.get('usuario', 'Desconocido')
+                self.lista_peers.insert(tk.END, f" {nombre} - IP: {ip}")
         else:
             self.lista_peers.insert(tk.END, " Sin peers conectados...")
 
