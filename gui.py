@@ -175,7 +175,12 @@ class BibliotecaGUI:
         if resultados:
             for res in resultados:
                 tamanio_mb = res['tamaño'] / (1024 * 1024)
-                info = f" {res['nombre']}  |  {tamanio_mb:.1f} MB  |  IP: {res['peer_ip']}"
+                ip_peer = res['peer_ip']
+                # busca al usuario a partir de la ip
+                datos_peer = self.nodo.peers_conocidos.get(ip_peer, {})
+                nombre_usuario = datos_peer.get('usuario', 'Desconocido')
+
+                info = f" {res['nombre']}  |  {tamanio_mb:.1f} MB  |  {nombre_usuario} (IP: {ip_peer})"
                 self.lista_resultados.insert(tk.END, info)
         else:
             self.lista_resultados.insert(tk.END, " No se encontraron resultados.")
