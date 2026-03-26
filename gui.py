@@ -175,7 +175,12 @@ class BibliotecaGUI:
         if resultados:
             for res in resultados:
                 tamanio_mb = res['tamaño'] / (1024 * 1024)
-                info = f" {res['nombre']}  |  {tamanio_mb:.1f} MB  |  IP: {res['peer_ip']}"
+                ip_peer = res['peer_ip']
+                # busca al usuario a partir de la ip
+                datos_peer = self.nodo.peers_conocidos.get(ip_peer, {})
+                nombre_usuario = datos_peer.get('usuario', 'Desconocido')
+
+                info = f" {res['nombre']}  |  {tamanio_mb:.1f} MB  |  {nombre_usuario} (IP: {ip_peer})"
                 self.lista_resultados.insert(tk.END, info)
         else:
             self.lista_resultados.insert(tk.END, " No se encontraron resultados.")
@@ -187,8 +192,9 @@ class BibliotecaGUI:
         self.lista_peers.delete(0, tk.END)
         peers = self.nodo.peers_conocidos
         if peers:
-            for ip, ultimo_pulso in peers.items():
-                self.lista_peers.insert(tk.END, f" IP: {ip}")
+            for ip, info in peers.items():
+                nombre = info.get('usuario', 'Desconocido')
+                self.lista_peers.insert(tk.END, f" {nombre} - IP: {ip}")
         else:
             self.lista_peers.insert(tk.END, " Sin peers conectados...")
 
@@ -365,16 +371,22 @@ class BibliotecaGUI:
                                 text_color="#52a8ff")
         lbl_estado.pack(pady=5)
 
+        reanudar = [False]
+        def notificar_reanudacion():
+            """Cambia el estado visual a 'Reanudando'"""
+            reanudar[0] = True
+            self.window.after(0, lambda: lbl_estado.configure(text="Reanudando descarga previa..."))
+
         def actualizar_barra(porcentaje):
             """
             Actualiza la barra de porcentaje en tiempo real
             """
             # CustomTkinter usa valores de 0.0 a 1.0 para la barra
             valor_barra = porcentaje / 100.0
-
+            texto_accion = "Reanudando..." if reanudar[0] else "Descargando..."
             # Usamos after(0, ...) para actualizar la GUI de forma segura desde otro hilo
             self.window.after(0, lambda: [progreso.set(valor_barra),
-                                        lbl_estado.configure(text=f"Descargando... {porcentaje:.1f}%")])
+                                        lbl_estado.configure(text=f"{texto_accion} {porcentaje:.1f}%")])
 
         def hilo_descarga():
             """
@@ -382,7 +394,10 @@ class BibliotecaGUI:
             """
             try:
                 # Llamada al método multifuente del nodo P2P
-                self.nodo.descargar_multifuente(titulo_seleccionado, callback_progress=actualizar_barra)
+                self.nodo.descargar_multifuente(titulo_seleccionado,
+                                                callback_progress=actualizar_barra,
+                                                callback_reanudar=notificar_reanudacion)
+                # En caso de encontrar registro de descarga previa, continua desde donde la dejo anteriormente
                 self.window.after(0, lambda: finalizar_descarga("¡Descarga Completada!", "#69ff6e"))
             except Exception as e:
                 self.window.after(0, lambda: finalizar_descarga(f"Error: {e}", "#ff5252"))
@@ -421,13 +436,13 @@ class BibliotecaGUI:
         frame_form.pack(fill="x", padx=20, pady=5)
 
         entry_titulo = ctk.CTkEntry(frame_form, placeholder_text="Título del libro", width=150)
-        entry_titulo.grid(row=0, column=0, padx=5, pady=5)
+        entry_titulo.grid(row=0, column=0, padx=5, pady=5, sticky="ew")
         
         entry_autor = ctk.CTkEntry(frame_form, placeholder_text="Autor", width=150)
-        entry_autor.grid(row=0, column=1, padx=5, pady=5)
+        entry_autor.grid(row=0, column=1, padx=5, pady=5, sticky="ew")
         
         entry_isbn = ctk.CTkEntry(frame_form, placeholder_text="ISBN", width=100)
-        entry_isbn.grid(row=0, column=2, padx=5, pady=5)
+        entry_isbn.grid(row=0, column=2, padx=5, pady=5, sticky="ew")
 
         # Lista de inventario
         ctk.CTkLabel(vent, font=("Aptos", 16, "bold"), text="Mi Estantería").pack(pady=(15, 5))
