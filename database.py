@@ -27,11 +27,14 @@ class GestorBiblioteca:
         self.conn.commit()
         
         # TABLA DE REPUTACIÓN
+        # eliminado porque se duplicaba el campo nombre para los usuarios
+        """
         self.cursor.execute('''CREATE TABLE IF NOT EXISTS usuarios (
                 nombre TEXT PRIMARY KEY,
                 puntos INTEGER DEFAULT 100
             )
         ''')
+        """
         
         # TABLA DE TRAZABILIDAD (Log)
         self.cursor.execute('''CREATE TABLE IF NOT EXISTS historial (
@@ -41,10 +44,48 @@ class GestorBiblioteca:
                 fecha TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
+
+        # NUEVA TABLA DE USUARIOS (Con reputación estilo Uber)
+        self.cursor.execute('''CREATE TABLE IF NOT EXISTS usuarios (
+                nombre TEXT PRIMARY KEY,
+                password TEXT NOT NULL,
+                calificacion REAL DEFAULT 5.0,
+                total_calificaciones INTEGER DEFAULT 1,
+                puntos INTEGER DEFAULT 100
+            )
+        ''')
         self.conn.commit()
         
-        
+    # --- NUEVOS MÉTODOS PARA LOGIN Y REPUTACIÓN ---
+    def registrar_usuario(self, nombre, password):
+        try:
+            self.cursor.execute("INSERT INTO usuarios (nombre, password, calificacion, total_calificaciones) VALUES (?, ?, 5.0, 1)", (nombre, password))
+            self.conn.commit()
+            return True
+        except sqlite3.IntegrityError:
+            return False # El usuario ya existe
 
+    def validar_usuario(self, nombre, password):
+        """Devuelve (calificacion, total_calificaciones) si el login es correcto, None si falla"""
+        self.cursor.execute("SELECT calificacion, total_calificaciones FROM usuarios WHERE nombre = ? AND password = ?", (nombre, password))
+        return self.cursor.fetchone() # Ahora retorna una tupla, ej: (5.0, 1)
+
+    def actualizar_mi_calificacion(self, nombre, nuevas_estrellas):
+        """Recalcula el promedio matemáticamente cuando alguien nos califica"""
+        self.cursor.execute("SELECT calificacion, total_calificaciones FROM usuarios WHERE nombre = ?", (nombre,))
+        res = self.cursor.fetchone()
+        if res:
+            calif_actual, total = res
+            nuevo_total = total + 1
+            nueva_calif = ((calif_actual * total) + nuevas_estrellas) / nuevo_total
+            
+            self.cursor.execute("UPDATE usuarios SET calificacion = ?, total_calificaciones = ? WHERE nombre = ?", 
+                              (round(nueva_calif, 1), nuevo_total, nombre))
+            self.conn.commit()
+            return nueva_calif
+        return 5.0
+
+    #registro y gestión de libros físicos
     def registrar_libro(self, titulo, autor, isbn):
         try:
             self.cursor.execute('''
@@ -65,7 +106,7 @@ class GestorBiblioteca:
         self.cursor.execute("UPDATE libros SET estado = 'prestado', poseedor_actual = ? WHERE id = ?", (nombre_usuario, libro_id))
         self.cursor.execute("INSERT INTO historial (libro_id, receptor) VALUES (?, ?)", (libro_id, nombre_usuario))
         # Sumar puntos por ser un usuario activo
-        self.cursor.execute("INSERT OR IGNORE INTO usuarios (nombre) VALUES (?)", (nombre_usuario,))
+        # self.cursor.execute("INSERT OR IGNORE INTO usuarios (nombre) VALUES (?)", (nombre_usuario,))
         self.cursor.execute("UPDATE usuarios SET puntos = puntos + 5 WHERE nombre = ?", (nombre_usuario,))
         self.conn.commit()
 

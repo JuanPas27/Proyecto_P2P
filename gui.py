@@ -11,15 +11,14 @@ from database import GestorBiblioteca
 ctk.set_appearance_mode("dark")  # Modo oscuro por defecto
 ctk.set_default_color_theme("blue")  # Color de acento (botones azules)
 
-
 class BibliotecaGUI:
-    def __init__(self):
+    def __init__(self, root_window):
         self.nodo = peer.P2P_Peer()  # Inicializar nodo P2P en segundo plano
-        self.db = GestorBiblioteca() 
+        self.db = GestorBiblioteca()
 
         # ventana principal con CustomTkinter
-        self.window = ctk.CTk()
-        self.window.title("Alejandria")
+        self.window = root_window
+        self.window.title("Cinvestav P2P - Biblioteca Compartida")
         self.window.geometry("850x600")
 
         # Configurar grid para que sea responsivo al maximizar
@@ -28,6 +27,16 @@ class BibliotecaGUI:
         self.window.rowconfigure(1, weight=1)  # La fila de las listas se expande verticalmente
 
         self.widgets()
+        
+        # Sustituir deiconify para windows
+        self.window.state('normal')  # Restaurar la ventana minimizada
+        self.window.lift()           # Traer la ventana al frente
+        self.window.focus_force()    # Poner en el foco
+        self.window.update()         # Forzar actualización
+        
+        # o usar deiconify() con un delay
+        #self.window.after(100, self.window.deiconify)
+
         self.update_peers()  # Iniciar bucle para refrescar peers
 
     def widgets(self):
@@ -448,29 +457,33 @@ class BibliotecaGUI:
         # NUEVA LÓGICA PARA DEVOLVER LIBRO FISICO
         def accion_devolver():
             seleccion = lista_inventario.curselection()
-            if not seleccion:
-                messagebox.showwarning("Atención", "Selecciona un libro de tu estantería primero.", parent=vent)
-                return
-            
+            if not seleccion: return
             texto_libro = lista_inventario.get(seleccion[0])
+            if "disponible" in texto_libro.lower(): return
+                
+            id_libro = texto_libro.split("|")[0].replace("ID:", "").strip()
             
-            # Verificar si realmente está prestado
-            if "disponible" in texto_libro.lower():
-                messagebox.showinfo("Info", "Este libro ya se encuentra disponible.", parent=vent)
-                return
+            # 1. Recuperar en la DB quién tenía el libro antes de devolverlo
+            self.db.cursor.execute("SELECT poseedor_actual FROM libros WHERE id=?", (id_libro,))
+            poseedor = self.db.cursor.fetchone()[0]
+
+            if self.db.devolver_libro(id_libro):
+                refrescar_lista()
                 
-            try:
-                # Extraer el ID del texto (ej. " ID: 1 | Titulo...")
-                id_libro = texto_libro.split("|")[0].replace("ID:", "").strip()
+                # 2. Pedir calificación (Uber style)
+                dialogo = ctk.CTkInputDialog(text=f"El libro fue devuelto por '{poseedor}'.\nDel 1 al 5, ¿cuántas estrellas le das?", title="Calificar Usuario")
+                estrellas = dialogo.get_input()
                 
-                # Actualizar base de datos
-                if self.db.devolver_libro(id_libro):
-                    messagebox.showinfo("Éxito", "El libro ha sido devuelto a tu estantería.", parent=vent)
-                    refrescar_lista() # Actualiza la lista para mostrar "disponible"
+                if estrellas and estrellas.isdigit() and 1 <= int(estrellas) <= 5:
+                    messagebox.showinfo("Éxito", "Gracias por calificar. El libro vuelve a estar disponible.", parent=vent)
+                    
+                    # 3. Buscar la IP de ese peer en nuestra lista y enviarle la calificación
+                    for ip in self.nodo.peers_conocidos.keys():
+                        stub = self.nodo.obtener_stub(ip)
+                        # Le disparamos la calificacion a la red. Si el peer sigue conectado, la recibe.
+                        threading.Thread(target=stub.enviar_calificacion_red, args=(int(estrellas),)).start()
                 else:
-                    messagebox.showerror("Error", "Hubo un problema al actualizar la base de datos.", parent=vent)
-            except Exception as e:
-                pass
+                    messagebox.showwarning("Aviso", "Libro devuelto, pero no se envió calificación.", parent=vent)
 
         # Botón debajo de la lista
         ctk.CTkButton(vent, 
@@ -548,8 +561,13 @@ class BibliotecaGUI:
             except:
                 return
 
-            # Iniciar petición
-            resp_prestamo = stub.solicitar_prestamo_fisico(id_libro)
+            # Iniciar petición enviando nuestros datos de reputación
+            resp_prestamo = stub.solicitar_prestamo_fisico(
+                id_libro, 
+                self.nodo.mi_usuario, 
+                self.nodo.mi_calificacion,
+                self.nodo.mi_total_calif
+            )
             
             if isinstance(resp_prestamo, dict) and resp_prestamo.get('estado') == 'PROCESO_INICIADO':
                 # Pedir el token que el dueño debe dictarle/mostrarle
@@ -578,11 +596,66 @@ class BibliotecaGUI:
         """
         self.window.mainloop()
 
-
 def main():
-    app = BibliotecaGUI()
-    app.iniciar()
+    db = GestorBiblioteca()
+    usuario_logueado = {"nombre": "", "calificacion": 5.0, "total_calif": 1}
 
+    # 1. CREAMOS LA ÚNICA VENTANA RAÍZ Y LA OCULTAMOS INMEDIATAMENTE
+    root = ctk.CTk()
+    root.withdraw()
+
+    # 2. CREAMOS EL LOGIN COMO VENTANA SECUNDARIA (Toplevel) SOBRE LA RAÍZ
+    login_win = ctk.CTkToplevel(root)
+    login_win.title("Iniciar Sesión")
+    login_win.geometry("300x350")
+    login_win.attributes('-topmost', True) # Asegura que salga al frente
+
+    ctk.CTkLabel(login_win, text="📚 CINVESTAV PRESTAMO", font=("Aptos", 20, "bold")).pack(pady=(20, 20))
+    
+    entry_user = ctk.CTkEntry(login_win, placeholder_text="Usuario")
+    entry_user.pack(pady=10)
+    entry_pass = ctk.CTkEntry(login_win, placeholder_text="Contraseña", show="*")
+    entry_pass.pack(pady=10)
+
+    def intentar_login():
+        u, p = entry_user.get(), entry_pass.get()
+        datos_usuario = db.validar_usuario(u, p)
+        
+        if datos_usuario:
+            usuario_logueado["nombre"] = u
+            usuario_logueado["calificacion"] = datos_usuario[0]
+            usuario_logueado["total_calif"] = datos_usuario[1]
+          
+            # Destruimos la ventana secundaria. Esto destraba el wait_window de abajo.
+            login_win.destroy()
+        else:
+            messagebox.showerror("Error", "Credenciales incorrectas", parent=login_win)
+
+    def intentar_registro():
+        u, p = entry_user.get(), entry_pass.get()
+        if u and p:
+            if db.registrar_usuario(u, p):
+                messagebox.showinfo("Éxito", "Registrado. Ahora inicia sesión.", parent=login_win)
+            else:
+                messagebox.showerror("Error", "El usuario ya existe", parent=login_win)
+
+    ctk.CTkButton(login_win, text="Iniciar Sesión", command=intentar_login).pack(pady=10)
+    ctk.CTkButton(login_win, text="Registrarse", fg_color="gray", command=intentar_registro).pack(pady=5)
+    
+    # 3. MAGIA: Pausamos la ejecución aquí hasta que login_win sea destruida
+    root.wait_window(login_win)
+
+    # 4. Verificamos si se cerró la ventana sin loguearse
+    if not usuario_logueado["nombre"]:
+        root.destroy()
+        return
+    
+    app = BibliotecaGUI(root) # Le pasamos nuestra única ventana raíz
+    app.nodo.mi_usuario = usuario_logueado["nombre"]
+    app.nodo.mi_calificacion = usuario_logueado["calificacion"]
+    app.nodo.mi_total_calif = usuario_logueado["total_calif"]
+    
+    app.iniciar() # Esto arrancará el root.mainloop() desde adentro de tu clase
 
 if __name__ == "__main__":
     main()

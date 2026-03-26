@@ -25,6 +25,7 @@ class Marshalling:
         'RESPUESTA_PRESTAMO': 0x14,
         'CONFIRMAR_ENTREGA': 0x15,
         'RESPUESTA_CONFIRMACION': 0x16,
+        'ENVIAR_CALIFICACION': 0x17,
         'ERROR': 0xFF
 
     }
@@ -155,7 +156,7 @@ class Marshalling:
         
         else:
             # Fallback a JSON para tipos no implementados
-            return json.dumps({'tipo': codigo, **kwargs}).encode()
+            return json.dumps({'tipo': tipo, **kwargs}).encode()
     
     @staticmethod
     def unmarshal(data):

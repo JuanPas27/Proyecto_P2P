@@ -56,9 +56,14 @@ class PeerStub:
         except Exception as e:
             return {'tipo': 'ERROR', 'mensaje': str(e)}
 
-    def solicitar_prestamo_fisico(self, id_libro):
+    def solicitar_prestamo_fisico(self, id_libro, mi_usuario, mi_calificacion, mi_total_calif):
         try:
-            mensaje = Marshalling.marshal('SOLICITUD_PRESTAMO', id_libro=id_libro, token=self.auth_token)
+            mensaje = Marshalling.marshal('SOLICITUD_PRESTAMO', 
+                                        id_libro=id_libro, 
+                                        usuario=mi_usuario,
+                                        calificacion=mi_calificacion,
+                                        total_calif=mi_total_calif,
+                                        token=self.auth_token)
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
                 sock.settimeout(self.timeout)
                 sock.connect((self.peer_ip, self.puerto_control))
@@ -83,3 +88,14 @@ class PeerStub:
                 return Marshalling.unmarshal(respuesta)
         except Exception as e:
             return {'tipo': 'ERROR', 'mensaje': str(e)}
+        
+    #Calificar al usuario
+    def enviar_calificacion_red(self, estrellas):
+        try:
+            mensaje = Marshalling.marshal('ENVIAR_CALIFICACION', estrellas=estrellas, token=self.auth_token)
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                sock.settimeout(self.timeout)
+                sock.connect((self.peer_ip, self.puerto_control))
+                sock.send(mensaje)
+        except Exception as e:
+            pass # Si el peer está desconectado, se pierde la calificación (común en P2P simple)
