@@ -90,9 +90,13 @@ class PeerStub:
             return {'tipo': 'ERROR', 'mensaje': str(e)}
         
     #Calificar al usuario
-    def enviar_calificacion_red(self, estrellas):
+    def enviar_calificacion_red(self, nombre_usuario, estrellas):
+        print(nombre_usuario)
         try:
-            mensaje = Marshalling.marshal('ENVIAR_CALIFICACION', estrellas=estrellas, token=self.auth_token)
+            mensaje = Marshalling.marshal('ENVIAR_CALIFICACION', 
+                                          nombre_usuario=nombre_usuario,
+                                          estrellas=estrellas, 
+                                          token=self.auth_token)
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
                 sock.settimeout(self.timeout)
                 sock.connect((self.peer_ip, self.puerto_control))

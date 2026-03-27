@@ -481,31 +481,34 @@ class BibliotecaGUI:
             
             # Obtener quién tiene el libro
             self.db.cursor.execute("SELECT poseedor_actual FROM libros WHERE id=?", (id_libro,))
-            poseedor = self.db.cursor.fetchone()[0]
+            prestatario = self.db.cursor.fetchone()[0]
             
             # Confirmar devolución
             confirmar = messagebox.askyesno(
                 "Confirmar Devolución", 
-                f"¿Confirmas la devolución del libro?\n\nPrestatario: {poseedor}",
+                f"¿Confirmas la devolución del libro?\n\nPrestatario: {prestatario}",
                 parent=vent
             )
             if not confirmar:
                 return
             
             # Realizar devolución
-            exito, prestatario = self.db.devolver_libro(id_libro)
+            exito, _ = self.db.devolver_libro(id_libro)
             if exito:
                 refrescar_lista()
+                
                 # Pedir calificación
                 dialogo = ctk.CTkInputDialog(
                     text=f"Libro devuelto por: {prestatario}\n\nDel 1 al 5, ¿cuántas estrellas le das?",
                     title="Calificar Usuario"
                 )
                 estrellas = dialogo.get_input()
+                
                 if estrellas and estrellas.isdigit() and 1 <= int(estrellas) <= 5:
-                    # Buscar la IP del peer para enviar calificación
+                    # Buscar la IP del peer por su nombre de usuario
                     peer_ip = None
                     for ip, info in self.nodo.peers_conocidos.items():
+                        print(info)
                         if info.get('usuario') == prestatario:
                             peer_ip = ip
                             break
@@ -513,12 +516,14 @@ class BibliotecaGUI:
                     if peer_ip:
                         try:
                             stub = self.nodo.obtener_stub(peer_ip)
+                            # Enviar calificación con el nombre de usuario
                             threading.Thread(target=stub.enviar_calificacion_red, 
-                                            args=(int(estrellas),), daemon=True).start()
+                                            args=(prestatario, int(estrellas)), daemon=True).start()
+                            messagebox.showinfo("Éxito", f"Libro devuelto correctamente", parent=vent)
                         except Exception as e:
-                            pass  # Si falla, se pierde la calificación
-                    
-                    messagebox.showinfo("Éxito", "Libro devuelto correctamente", parent=vent)
+                            messagebox.showinfo("Éxito", "Libro devuelto correctamente", parent=vent)
+                    else:
+                        messagebox.showinfo("Éxito", "Libro devuelto correctamente", parent=vent)
                 else:
                     messagebox.showinfo("Éxito", "Libro devuelto correctamente", parent=vent)
             else:
@@ -602,13 +607,15 @@ class BibliotecaGUI:
                 print(id_libro)
             except:
                 return
+            
+            cal, total = self.db.ver_mi_calificacion(self.nodo.mi_usuario)
 
             # Iniciar petición enviando nuestros datos de reputación
             resp_prestamo = stub.solicitar_prestamo_fisico(
                 id_libro, 
                 self.nodo.mi_usuario, 
-                self.nodo.mi_calificacion,
-                self.nodo.mi_total_calif
+                cal,
+                total
             )
 
             print(resp_prestamo)
@@ -620,7 +627,7 @@ class BibliotecaGUI:
 
                 if token_ingresado:
                     # Enviar token para confirmación. Usamos un nombre genérico o el ID del nodo local
-                    mi_nombre = f"Peer_{self.nodo.mi_id}" 
+                    mi_nombre = f"{self.nodo.mi_usuario}" 
                     resp_conf = stub.confirmar_entrega_fisica(id_libro, mi_nombre, token_ingresado.upper())
                     
                     if isinstance(resp_conf, dict) and resp_conf.get('estado') == 'OK':

@@ -151,6 +151,14 @@ class Marshalling:
             data += struct.pack(f'!{len(token_bytes)}s', token_bytes)
             return data
         
+        # ENVIAR_CALIFICACION: nombre_usuario + estrellas + token
+        elif tipo == 'ENVIAR_CALIFICACION':
+            nombre_bytes = kwargs['nombre_usuario'].encode()
+            token_bytes = kwargs['token'].encode()
+            formato = f'!B B {len(nombre_bytes)}s d {len(token_bytes)}s'
+            return struct.pack(formato, codigo, len(nombre_bytes), nombre_bytes, 
+                            kwargs['estrellas'], token_bytes)
+        
         # ERROR: mensaje + token
         elif tipo == 'ERROR':
             msg_bytes = kwargs['mensaje'].encode()
@@ -365,6 +373,17 @@ class Marshalling:
                 token = data[offset:].decode()
                 
                 return {'tipo': tipo, 'peers': peers, 'token': token}
+            
+            # ENVIAR_CALIFICACION
+            elif tipo == 'ENVIAR_CALIFICACION':
+                nombre_len = struct.unpack('!B', data[offset:offset+1])[0]
+                offset += 1
+                nombre_usuario = data[offset:offset+nombre_len].decode()
+                offset += nombre_len
+                estrellas = struct.unpack('!d', data[offset:offset+8])[0]
+                offset += 8
+                token = data[offset:].decode()
+                return {'tipo': tipo, 'nombre_usuario': nombre_usuario, 'estrellas': estrellas, 'token': token}
             
             # ERROR
             elif tipo == 'ERROR':
