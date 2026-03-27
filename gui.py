@@ -526,10 +526,11 @@ class BibliotecaGUI:
             return
 
         item_texto = self.lista_peers.get(seleccion[0])
-        if "IP:" not in item_texto:
-            return
-
-        ip_seleccionada = item_texto.replace("IP:", "").strip()
+        
+        # Obtener usuario e ip separadas
+        ip_part = item_texto.split("IP: ")[1]
+        ip_seleccionada = ip_part.strip()
+        nombre_peer = item_texto.split(" - ")[0].strip()
 
         # Ventana para mostrar los libros del vecino
         vent = ctk.CTkToplevel(self.window)
@@ -537,7 +538,7 @@ class BibliotecaGUI:
         vent.geometry("550x400")
         vent.attributes('-topmost', True)
 
-        ctk.CTkLabel(vent, font=("Aptos", 16, "bold"), text=f"Estantería de: {ip_seleccionada}").pack(pady=(15, 5))
+        ctk.CTkLabel(vent, font=("Aptos", 16, "bold"), text=f"Estantería de: {nombre_peer} ({ip_seleccionada})").pack(pady=(15, 5))
 
         lista_libros = tk.Listbox(vent, bg="#2b2b2b", fg="white", bd=0, highlightthickness=0, font=("Aptos", 12))
         lista_libros.pack(fill="both", expand=True, padx=20, pady=10)
@@ -554,6 +555,7 @@ class BibliotecaGUI:
         else:
             lista_libros.insert(tk.END, " Error al obtener el catálogo del peer.")
 
+        # Solicitud de libro fisico
         def accion_solicitar():
             sel_libro = lista_libros.curselection()
             if not sel_libro:
@@ -564,6 +566,7 @@ class BibliotecaGUI:
             texto_libro = lista_libros.get(sel_libro[0])
             try:
                 id_libro = texto_libro.split("|")[0].replace("ID:", "").strip()
+                print(id_libro)
             except:
                 return
 
@@ -574,6 +577,8 @@ class BibliotecaGUI:
                 self.nodo.mi_calificacion,
                 self.nodo.mi_total_calif
             )
+
+            print(resp_prestamo)
             
             if isinstance(resp_prestamo, dict) and resp_prestamo.get('estado') == 'PROCESO_INICIADO':
                 # Pedir el token que el dueño debe dictarle/mostrarle
@@ -657,6 +662,12 @@ def main():
         return
     
     app = BibliotecaGUI(root) # Le pasamos nuestra única ventana raíz
+
+    # Pasar la base de datos al nodo P2P al inicializar
+    app.nodo.db = db
+    # O crear nuevo  P2P_Peer con db
+    # app.nodo = peer.P2P_Peer(db=db)
+
     app.nodo.mi_usuario = usuario_logueado["nombre"]
     app.nodo.mi_calificacion = usuario_logueado["calificacion"]
     app.nodo.mi_total_calif = usuario_logueado["total_calif"]

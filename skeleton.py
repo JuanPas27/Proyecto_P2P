@@ -11,6 +11,8 @@ from marshalling import Marshalling
 class PeerSkeleton:
     def __init__(self, peer_instancia):
         self.peer = peer_instancia
+        # Referencia a la base de datos desde el peer
+        self.db = self.peer.db
         self.manejadores = {
             'DISCOVERY': self._manejar_discovery,
             'DISCOVERY_RESPONSE': self._manejar_discovery_response,
@@ -180,10 +182,10 @@ class PeerSkeleton:
         self.db.guardar_token_temporal(id_libro, token)
         
         print(f"\n[!] ALGUIEN QUIERE UN LIBRO FÍSICO")
-        print(f"   👤 Usuario: {usuario_req}")
-        print(f"   ⭐ Reputación: {calif_req}/5.0 (Basado en {total_req} préstamos)")
-        print(f"   🔑 TOKEN DE TRANSFERENCIA: {token}")
-        print("   Si confías en su reputación, muéstrale el token para validar.")
+        print(f" Usuario: {usuario_req}")
+        print(f" Reputación: {calif_req}/5.0 (Basado en {total_req} préstamos)")
+        print(f" TOKEN DE TRANSFERENCIA: {token}")
+        print("  Si confías en su reputación, muéstrale el token para validar.")
         
         return {
             'tipo': 'RESPUESTA_PRESTAMO',
@@ -208,7 +210,7 @@ class PeerSkeleton:
         nueva_calif = self.db.actualizar_mi_calificacion(self.peer.mi_usuario, estrellas)
         print(f"\n[⭐] ¡Te acaban de calificar con {estrellas} estrellas! Tu nuevo promedio es: {nueva_calif}")
         return None
-    
+    '''
     def _manejar_solicitar_prestamo(self, mensaje, addr):
         id_libro = mensaje['id_libro']
         usuario_req = mensaje.get('usuario', 'Desconocido')
@@ -222,4 +224,4 @@ class PeerSkeleton:
         print(f"   TOKEN: {token}")
         print("   Si confías en su calificación, muéstrale el token para validar.")
         
-        return {'tipo': 'RESPUESTA_PRESTAMO', 'estado': 'PROCESO_INICIADO', 'mensaje': 'El dueño tiene el código'}
+        return {'tipo': 'RESPUESTA_PRESTAMO', 'estado': 'PROCESO_INICIADO', 'mensaje': 'El dueño tiene el código'}'''

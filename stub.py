@@ -58,7 +58,7 @@ class PeerStub:
 
     def solicitar_prestamo_fisico(self, id_libro, mi_usuario, mi_calificacion, mi_total_calif):
         try:
-            mensaje = Marshalling.marshal('SOLICITUD_PRESTAMO', 
+            mensaje = Marshalling.marshal('SOLICITAR_PRESTAMO', 
                                         id_libro=id_libro, 
                                         usuario=mi_usuario,
                                         calificacion=mi_calificacion,
