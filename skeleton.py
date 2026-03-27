@@ -217,8 +217,9 @@ class PeerSkeleton:
         
     #Calificar usuario
     def _manejar_nueva_calificacion(self, mensaje, addr):
+        nombre_usuario = mensaje['nombre_usuario']
         estrellas = float(mensaje['estrellas'])
         # Actualizamos nuestro propio puntaje en nuestra DB local
-        nueva_calif = self.db.actualizar_mi_calificacion(self.peer.mi_usuario, estrellas)
+        nueva_calif = self.db.actualizar_mi_calificacion(nombre_usuario, estrellas)
         print(f"\n¡Te acaban de calificar con {estrellas} estrellas! Tu nuevo promedio es: {nueva_calif}")
         return None

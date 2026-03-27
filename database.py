@@ -84,6 +84,15 @@ class GestorBiblioteca:
             self.conn.commit()
             return nueva_calif
         return 5.0
+    
+    def ver_mi_calificacion(self, nombre):
+        """Recalcula el promedio matemáticamente cuando alguien nos califica"""
+        self.cursor.execute("SELECT calificacion, total_calificaciones FROM usuarios WHERE nombre = ?", (nombre,))
+        res = self.cursor.fetchone()
+        if res:
+            calif_actual, total = res
+            return calif_actual, total
+        return 5.0, 1
 
     #registro y gestión de libros físicos
     def registrar_libro(self, titulo, autor, isbn):
