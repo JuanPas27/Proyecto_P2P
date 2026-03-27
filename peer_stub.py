@@ -12,6 +12,7 @@ from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from skeleton import PeerSkeleton
 from stub import PeerStub
 from marshalling import Marshalling
+from database import GestorBiblioteca
 
 # P2P general
 class P2P_Peer:
@@ -21,8 +22,7 @@ class P2P_Peer:
     la compartición y descarga de archivos, y el mantenimiento
     de la red.
     """
-
-    def __init__(self):
+    def __init__(self, db=None):
         # Contraseña común para todos los peers (autenticación simple)
         self.PASSWORD = "el_shrek"
         # Carpeta donde se colocan los archivos a compartir
@@ -50,6 +50,8 @@ class P2P_Peer:
         self.peers_conocidos = {}  # ip -> timestamp ultimo heartbeat
         self.stubs = {}  # Caché de objetos stub para comunicación con cada peer
         self.mi_usuario = "Desconocido"
+        # Referencia a la base de datos
+        self.db = db if db else GestorBiblioteca()
         
         # Archivos conocidos en la red (nombre -> lista de (ip, peer_id))
         self.file_peers = {}
