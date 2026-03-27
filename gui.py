@@ -21,7 +21,7 @@ class BibliotecaGUI:
 
         # ventana principal con CustomTkinter
         self.window = root_window
-        self.window.title("Cinvestav P2P - Biblioteca Compartida")
+        self.window.title("Biblioteca Compartida - Alejandría")
         self.window.geometry("850x600")
 
         # Configurar grid para que sea responsivo al maximizar
