@@ -166,7 +166,7 @@ class PeerSkeleton:
         }
     
     def _manejar_listar_libros(self, mensaje, addr):
-        libros = self.db.listar_libros()
+        libros = self.db.listar_libros_disponibles()
         return {
             'tipo': 'RESPUESTA_LIBROS',
             'libros': libros
@@ -220,20 +220,5 @@ class PeerSkeleton:
         estrellas = float(mensaje['estrellas'])
         # Actualizamos nuestro propio puntaje en nuestra DB local
         nueva_calif = self.db.actualizar_mi_calificacion(self.peer.mi_usuario, estrellas)
-        print(f"\n[⭐] ¡Te acaban de calificar con {estrellas} estrellas! Tu nuevo promedio es: {nueva_calif}")
+        print(f"\n¡Te acaban de calificar con {estrellas} estrellas! Tu nuevo promedio es: {nueva_calif}")
         return None
-    '''
-    def _manejar_solicitar_prestamo(self, mensaje, addr):
-        id_libro = mensaje['id_libro']
-        usuario_req = mensaje.get('usuario', 'Desconocido')
-        calif_req = mensaje.get('calificacion', 5.0)
-        
-        token = str(uuid.uuid4())[:6].upper()
-        self.db.guardar_token_temporal(id_libro, token)
-        
-        print(f"\n[!] PRESTAMO SOLICITADO")
-        print(f"   Usuario: {usuario_req} (⭐ {calif_req}/5.0)")
-        print(f"   TOKEN: {token}")
-        print("   Si confías en su calificación, muéstrale el token para validar.")
-        
-        return {'tipo': 'RESPUESTA_PRESTAMO', 'estado': 'PROCESO_INICIADO', 'mensaje': 'El dueño tiene el código'}'''

@@ -98,6 +98,10 @@ class GestorBiblioteca:
             print(f"Error: El libro con ISBN {isbn} ya está registrado.")
 
     def listar_libros(self):
+        self.cursor.execute("SELECT * FROM libros")
+        return self.cursor.fetchall()
+    
+    def listar_libros_disponibles(self):
         self.cursor.execute("SELECT * FROM libros WHERE estado != 'prestado'")
         return self.cursor.fetchall()
     
@@ -131,13 +135,32 @@ class GestorBiblioteca:
     def devolver_libro(self, libro_id):
         """Marca un libro prestado como disponible nuevamente."""
         try:
+            # Obtener quién tenía el libro antes de devolverlo
+            self.cursor.execute("SELECT poseedor_actual FROM libros WHERE id = ?", (libro_id,))
+            resultado = self.cursor.fetchone()
+            poseedor = resultado[0] if resultado else None
+            
+            # Actualizar el estado del libro
             self.cursor.execute('''
                 UPDATE libros 
                 SET estado = 'disponible', poseedor_actual = 'yo', token_temp = NULL 
-                WHERE id = ?
+                WHERE id = ? AND estado = 'prestado'
             ''', (libro_id,))
-            self.conn.commit()
-            return True
+            
+            if self.cursor.rowcount > 0:
+                self.conn.commit()
+                return True, poseedor
+            else:
+                return False, None
         except Exception as e:
             print(f"Error al devolver libro: {e}")
-            return False
+            return False, None
+        
+    def obtener_historial_prestamos(self):
+        self.cursor.execute("""
+                            SELECT l.titulo, l.autor, h.receptor, h.fecha 
+                            FROM historial h 
+                            JOIN libros l ON h.libro_id = l.id 
+                            ORDER BY h.fecha DESC LIMIT 50
+                            """)
+        return self.cursor.fetchall()

@@ -458,48 +458,78 @@ class BibliotecaGUI:
             libros = self.db.listar_libros()
             if libros:
                 for l in libros:
-                    # Formato: ID | Titulo | Autor | Estado
-                    lista_inventario.insert(tk.END, f" ID: {l[0]} | {l[1]} - {l[2]} | Estado: {l[4]}")
+                    if l[4] == 'prestado':
+                        lista_inventario.insert(tk.END, f" ID: {l[0]} | {l[1]} - {l[2]} | PRESTADO a: {l[5]}")
+                    else:
+                        lista_inventario.insert(tk.END, f" ID: {l[0]} | {l[1]} - {l[2]} | DISPONIBLE")
             else:
                 lista_inventario.insert(tk.END, " No hay libros registrados.")
         
         # NUEVA LÓGICA PARA DEVOLVER LIBRO FISICO
         def accion_devolver():
             seleccion = lista_inventario.curselection()
-            if not seleccion: return
+            if not seleccion:
+                messagebox.showwarning("Atención", "Selecciona un libro para devolver", parent=vent)
+                return
+                
             texto_libro = lista_inventario.get(seleccion[0])
-            if "disponible" in texto_libro.lower(): return
+            if "DISPONIBLE" in texto_libro:
+                messagebox.showinfo("Información", "Este libro ya está disponible", parent=vent)
+                return
                 
             id_libro = texto_libro.split("|")[0].replace("ID:", "").strip()
             
-            # 1. Recuperar en la DB quién tenía el libro antes de devolverlo
+            # Obtener quién tiene el libro
             self.db.cursor.execute("SELECT poseedor_actual FROM libros WHERE id=?", (id_libro,))
             poseedor = self.db.cursor.fetchone()[0]
-
-            if self.db.devolver_libro(id_libro):
+            
+            # Confirmar devolución
+            confirmar = messagebox.askyesno(
+                "Confirmar Devolución", 
+                f"¿Confirmas la devolución del libro?\n\nPrestatario: {poseedor}",
+                parent=vent
+            )
+            if not confirmar:
+                return
+            
+            # Realizar devolución
+            exito, prestatario = self.db.devolver_libro(id_libro)
+            if exito:
                 refrescar_lista()
-                
-                # 2. Pedir calificación (Uber style)
-                dialogo = ctk.CTkInputDialog(text=f"El libro fue devuelto por '{poseedor}'.\nDel 1 al 5, ¿cuántas estrellas le das?", title="Calificar Usuario")
+                # Pedir calificación
+                dialogo = ctk.CTkInputDialog(
+                    text=f"Libro devuelto por: {prestatario}\n\nDel 1 al 5, ¿cuántas estrellas le das?",
+                    title="Calificar Usuario"
+                )
                 estrellas = dialogo.get_input()
-                
                 if estrellas and estrellas.isdigit() and 1 <= int(estrellas) <= 5:
-                    messagebox.showinfo("Éxito", "Gracias por calificar. El libro vuelve a estar disponible.", parent=vent)
+                    # Buscar la IP del peer para enviar calificación
+                    peer_ip = None
+                    for ip, info in self.nodo.peers_conocidos.items():
+                        if info.get('usuario') == prestatario:
+                            peer_ip = ip
+                            break
                     
-                    # 3. Buscar la IP de ese peer en nuestra lista y enviarle la calificación
-                    for ip in self.nodo.peers_conocidos.keys():
-                        stub = self.nodo.obtener_stub(ip)
-                        # Le disparamos la calificacion a la red. Si el peer sigue conectado, la recibe.
-                        threading.Thread(target=stub.enviar_calificacion_red, args=(int(estrellas),)).start()
+                    if peer_ip:
+                        try:
+                            stub = self.nodo.obtener_stub(peer_ip)
+                            threading.Thread(target=stub.enviar_calificacion_red, 
+                                            args=(int(estrellas),), daemon=True).start()
+                        except Exception as e:
+                            pass  # Si falla, se pierde la calificación
+                    
+                    messagebox.showinfo("Éxito", "Libro devuelto correctamente", parent=vent)
                 else:
-                    messagebox.showwarning("Aviso", "Libro devuelto, pero no se envió calificación.", parent=vent)
+                    messagebox.showinfo("Éxito", "Libro devuelto correctamente", parent=vent)
+            else:
+                messagebox.showerror("Error", "No se pudo devolver el libro", parent=vent)
 
-        # Botón debajo de la lista
+        # Botón de devolución
         ctk.CTkButton(vent, 
-                      text="Marcar como Devuelto", 
-                      font=("Aptos", 14),
-                      fg_color="#b58d00", hover_color="#8a6b00", # Color mostaza para diferenciar
-                      command=accion_devolver).pack(pady=(0, 15))
+                    text="Devolver Libro", 
+                    font=("Aptos", 14),
+                    fg_color="#b58d00", hover_color="#8a6b00",
+                    command=accion_devolver).pack(pady=(0, 15))
 
         def accion_registrar():
             t, a, i = entry_titulo.get(), entry_autor.get(), entry_isbn.get()
