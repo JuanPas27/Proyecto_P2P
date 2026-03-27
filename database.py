@@ -98,7 +98,7 @@ class GestorBiblioteca:
             print(f"Error: El libro con ISBN {isbn} ya está registrado.")
 
     def listar_libros(self):
-        self.cursor.execute("SELECT * FROM libros")
+        self.cursor.execute("SELECT * FROM libros WHERE estado != 'prestado'")
         return self.cursor.fetchall()
     
     #Registrar el préstamo oficialmente

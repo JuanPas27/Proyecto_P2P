@@ -181,11 +181,23 @@ class PeerSkeleton:
         token = str(uuid.uuid4())[:6].upper()
         self.db.guardar_token_temporal(id_libro, token)
         
+        # Obtener información del libro para mostrarla
+        self.db.cursor.execute("SELECT titulo FROM libros WHERE id=?", (id_libro,))
+        libro_info = self.db.cursor.fetchone()
+        titulo_libro = libro_info[0] if libro_info else "Desconocido"
+        
         print(f"\n[!] ALGUIEN QUIERE UN LIBRO FÍSICO")
         print(f" Usuario: {usuario_req}")
         print(f" Reputación: {calif_req}/5.0 (Basado en {total_req} préstamos)")
+        print(f" Libro: {titulo_libro}")
         print(f" TOKEN DE TRANSFERENCIA: {token}")
         print("  Si confías en su reputación, muéstrale el token para validar.")
+        
+        # Si hay un callback registrado para mostrar en GUI, ejecutarlo
+        print(hasattr(self.peer, 'mostrar_token_callback'))
+        print(self.peer.mostrar_token_callback)
+        if hasattr(self.peer, 'mostrar_token_callback') and self.peer.mostrar_token_callback:
+            self.peer.mostrar_token_callback(token, usuario_req, calif_req, titulo_libro)
         
         return {
             'tipo': 'RESPUESTA_PRESTAMO',

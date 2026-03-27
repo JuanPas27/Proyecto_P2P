@@ -16,6 +16,9 @@ class BibliotecaGUI:
         self.nodo = peer.P2P_Peer()  # Inicializar nodo P2P en segundo plano
         self.db = GestorBiblioteca()
 
+        # Callback para mostrar token
+        self.nodo.mostrar_token_callback = self.mostrar_token_prestamo
+
         # ventana principal con CustomTkinter
         self.window = root_window
         self.window.title("Cinvestav P2P - Biblioteca Compartida")
@@ -607,6 +610,89 @@ class BibliotecaGUI:
         """
         self.window.mainloop()
 
+    def mostrar_token_prestamo(self, token, usuario, calificacion, titulo_libro):
+        """Mostrar una ventana con el token para prestar"""
+        # Crear ventana en el hilo principal
+        def crear_ventana():
+            vent = ctk.CTkToplevel(self.window)
+            vent.title("¡Solicitud de Préstamo!")
+            vent.geometry("450x350")
+            vent.attributes('-topmost', True)
+            
+            # Configurar para que se cierre automáticamente después de 60 segundos
+            vent.after(60000, vent.destroy)
+            
+            # Icono y título
+            ctk.CTkLabel(vent, 
+                        text="Solicitud de Préstamo", 
+                        font=("Aptos", 18, "bold"),
+                        text_color="#ffa500").pack(pady=(20, 10))
+            
+            # Información del solicitante
+            ctk.CTkLabel(vent, 
+                        text=f"Usuario: {usuario}", 
+                        font=("Aptos", 14)).pack(pady=5)
+            
+            ctk.CTkLabel(vent, 
+                        text=f"Reputación: {calificacion:.1f} / 5.0", 
+                        font=("Aptos", 14)).pack(pady=5)
+            
+            ctk.CTkLabel(vent, 
+                        text=f"Libro solicitado: {titulo_libro}", 
+                        font=("Aptos", 14)).pack(pady=5)
+            
+            # Línea separadora
+            ctk.CTkFrame(vent, height=2, fg_color="gray").pack(fill="x", padx=20, pady=15)
+            
+            # Mostrar token
+            ctk.CTkLabel(vent, 
+                        text="TOKEN DE TRANSFERENCIA:", 
+                        font=("Aptos", 14, "bold")).pack(pady=(10, 5))
+            
+            token_frame = ctk.CTkFrame(vent, fg_color="#2b2b2b", corner_radius=10)
+            token_frame.pack(pady=10)
+            
+            ctk.CTkLabel(token_frame, 
+                        text=token, 
+                        font=("Aptos", 28, "bold"),
+                        text_color="#52a8ff").pack(padx=20, pady=15)
+            
+            # Instrucciones
+            ctk.CTkLabel(vent, 
+                        text="Instrucciones:", 
+                        font=("Aptos", 12, "bold")).pack(pady=(15, 5))
+            
+            ctk.CTkLabel(vent, 
+                        text="1. Verifica que confías en la reputación del solicitante\n"
+                            "2. Comunica este código al solicitante\n"
+                            "3. El solicitante debe ingresarlo en su aplicación\n"
+                            "4. El préstamo se realizara automáticamente",
+                        font=("Aptos", 11),
+                        justify="left").pack(pady=5)
+            
+            # Botón para copiar token al portapapeles
+            def copiar_token():
+                self.window.clipboard_clear()
+                self.window.clipboard_append(token)
+                messagebox.showinfo("Copiado", "Token copiado al portapapeles", parent=vent)
+            
+            ctk.CTkButton(vent, 
+                        text="Copiar Token", 
+                        font=("Aptos", 12),
+                        corner_radius=20,
+                        command=copiar_token).pack(pady=15)
+            
+            # Botón para cerrar
+            ctk.CTkButton(vent, 
+                        text="Cerrar", 
+                        font=("Aptos", 12),
+                        fg_color="gray",
+                        corner_radius=20,
+                        command=vent.destroy).pack(pady=10)
+        
+        # Ejecutar en el hilo principal
+        self.window.after(0, crear_ventana)
+
 def main():
     db = GestorBiblioteca()
     usuario_logueado = {"nombre": "", "calificacion": 5.0, "total_calif": 1}
@@ -621,7 +707,7 @@ def main():
     login_win.geometry("300x350")
     login_win.attributes('-topmost', True) # Asegura que salga al frente
 
-    ctk.CTkLabel(login_win, text="📚 CINVESTAV PRESTAMO", font=("Aptos", 20, "bold")).pack(pady=(20, 20))
+    ctk.CTkLabel(login_win, text="CINVESTAV PRESTAMO", font=("Aptos", 20, "bold")).pack(pady=(20, 20))
     
     entry_user = ctk.CTkEntry(login_win, placeholder_text="Usuario")
     entry_user.pack(pady=10)
